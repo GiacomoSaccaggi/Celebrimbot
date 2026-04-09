@@ -5,3 +5,7 @@
 .kotlin
 .qodana
 build
+/.amazonq/
+/.idea/
+/.run/
+/develop/

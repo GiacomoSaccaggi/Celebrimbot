@@ -9,7 +9,17 @@
     <resource-bundle>messages.MyBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.giacomosaccaggi.celebrimbot.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
-        <postStartupActivity implementation="com.github.giacomosaccaggi.celebrimbot.startup.MyProjectActivity" />
+        <projectConfigurable
+                parentId="tools"
+                instance="com.github.giacomosaccaggi.celebrimbot.settings.CelebrimbotSettingsConfigurable"
+                id="com.github.giacomosaccaggi.celebrimbot.settings.CelebrimbotSettingsConfigurable"
+                displayName="Celebrimbot"/>
+
+        <toolWindow factoryClass="com.github.giacomosaccaggi.celebrimbot.toolWindow.CelebrimbotToolWindowFactory"
+                    id="Celebrimbot"
+                    anchor="right"
+                    icon="/icons/celebrimbot.svg"/>
+        <postStartupActivity implementation="com.github.giacomosaccaggi.celebrimbot.startup.CelebrimbotStartupActivity" />
+        <notificationGroup id="Celebrimbot Notifications" displayType="BALLOON" />
     </extensions>
 </idea-plugin>
