@@ -9,6 +9,7 @@ plugins {
     alias(libs.plugins.changelog) // Gradle Changelog Plugin
     alias(libs.plugins.qodana) // Gradle Qodana Plugin
     alias(libs.plugins.kover) // Gradle Kover Plugin
+    id("com.github.johnrengelman.shadow") version "8.1.1"
 }
 
 group = providers.gradleProperty("pluginGroup").get()
@@ -31,6 +32,14 @@ repositories {
 
 // Dependencies are managed with Gradle version catalog - read more: https://docs.gradle.org/current/userguide/version_catalogs.html
 dependencies {
+    implementation(libs.gson)
+    // java-llama.cpp — exclude coroutines pulled in transitively to avoid
+    // debug metadata version mismatch with the IDE's bundled kotlinx-coroutines
+    implementation(libs.llama) {
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core-jvm")
+    }
+    
     testImplementation(libs.junit)
     testImplementation(libs.opentest4j)
 
@@ -134,6 +143,12 @@ tasks {
 
     publishPlugin {
         dependsOn(patchChangelog)
+    }
+
+    shadowJar {
+        // Exclude coroutines — use the ones bundled with the IDE to avoid metadata version mismatch
+        exclude("kotlinx/coroutines/**")
+        exclude("kotlin/coroutines/jvm/internal/DebugProbes*")
     }
 }
 
