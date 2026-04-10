@@ -10,10 +10,12 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiManager
 import com.intellij.psi.search.FilenameIndex
 import com.intellij.psi.search.GlobalSearchScope
+import java.io.File
 
 @Service(Service.Level.PROJECT)
 class CelebrimbotAgentOrchestrator(private val project: Project) {
@@ -22,20 +24,38 @@ class CelebrimbotAgentOrchestrator(private val project: Project) {
     private val llmService = CelebrimbotLlmService.getInstance(project)
     private val terminalService = CelebrimbotTerminalService.getInstance(project)
 
-    fun executePlan(userPrompt: String, projectSkeleton: String, onProgress: (String) -> Unit) {
+    fun executePlan(
+        userPrompt: String,
+        projectSkeleton: String,
+        conversationHistory: List<Pair<String, String>> = emptyList(),
+        onProgress: (String) -> Unit
+    ) {
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
                 if (isConversational(userPrompt)) {
-                    val contextPrompt = if (projectSkeleton.isNotEmpty())
-                        "Project context:\n$projectSkeleton\n\nUser: $userPrompt"
-                    else userPrompt
+                    val contextPrompt = buildString {
+                        if (projectSkeleton.isNotEmpty()) append("Project context:\n$projectSkeleton\n\n")
+                        if (conversationHistory.isNotEmpty()) {
+                            append("Conversation so far:\n")
+                            conversationHistory.forEach { (role, content) -> append("$role: $content\n") }
+                            append("\n")
+                        }
+                        append("User: $userPrompt")
+                    }
                     val response = llmService.askChat(contextPrompt)
                     onProgress("<b>Celebrimbot:</b> $response")
                     return@executeOnPooledThread
                 }
 
                 onProgress("<i>[🧠 Planner: deciding strategy...]</i>")
-                val plannerPrompt = "User Prompt: $userPrompt\n\nProject Skeleton:\n$projectSkeleton"
+                val plannerPrompt = buildString {
+                    if (conversationHistory.isNotEmpty()) {
+                        append("Conversation history:\n")
+                        conversationHistory.forEach { (role, content) -> append("$role: $content\n") }
+                        append("\n")
+                    }
+                    append("Current request: $userPrompt\n\nProject Skeleton:\n$projectSkeleton")
+                }
                 val plannerJson = llmService.askPlanner(plannerPrompt)
                 val plannerResult = parsePlannerResult(plannerJson)
 
@@ -55,6 +75,8 @@ class CelebrimbotAgentOrchestrator(private val project: Project) {
                             val result = executeTaskWithRetry(task, onProgress, sharedContext, userPrompt, projectSkeleton)
                             if (task.action == "read_psi" && result.isSuccess) {
                                 sharedContext = result.output
+                                val escaped = result.output
+                                    .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                                 onProgress("<i>[📄 Read ${task.target}: ${result.output.length} chars]</i>")
                             }
                         }
@@ -81,7 +103,8 @@ class CelebrimbotAgentOrchestrator(private val project: Project) {
             onProgress("<i>[⚙️ Worker: 🖥️ Local Qwen → task ${task.id} - ${task.action} (attempt ${retryCount + 1})]</i>")
             val result = performAction(task, lastError, context)
             if (result.isSuccess) {
-                if (result.output.isNotEmpty()) onProgress(result.output)
+                // Don't emit raw file content as progress — caller handles read_psi output
+                if (result.output.isNotEmpty() && task.action != "read_psi") onProgress(result.output)
                 return result
             }
             retryCount++
@@ -130,34 +153,44 @@ class CelebrimbotAgentOrchestrator(private val project: Project) {
 
     private fun writeCodeAction(task: CelebrimbotTask, lastError: String, context: String = ""): ActionResult {
         val workerPrompt = buildString {
-            append("Task: ${task.instruction}\nTarget File: ${task.target}\n")
-            if (context.isNotEmpty()) append("Current file content:\n$context\n")
-            if (lastError.isNotEmpty()) append("Previous Error: $lastError\n")
+            append("Write the code for this task: ${task.instruction}\nTarget file: ${task.target}\n")
+            if (context.isNotEmpty()) append("Current file content to modify:\n$context\n")
+            if (lastError.isNotEmpty()) append("Previous attempt failed: $lastError. Fix it.\n")
         }
 
         val codeResponse = llmService.askWorker(workerPrompt)
         val code = extractCode(codeResponse) ?: return ActionResult(false, "No code block found in Worker response.")
 
-        val targetFile: VirtualFile? = task.target?.let { targetPath ->
-            val fileName = targetPath.substringAfterLast('/').substringAfterLast('\\')
-            ReadAction.compute<VirtualFile?, Exception> {
-                FilenameIndex.getVirtualFilesByName(fileName, GlobalSearchScope.projectScope(project)).firstOrNull()
-            }
+        val targetPath = task.target ?: return ActionResult(false, "No target file specified")
+        val fileName = targetPath.substringAfterLast('/').substringAfterLast('\\')
+
+        // Look for existing file in project
+        var targetFile: VirtualFile? = ReadAction.compute<VirtualFile?, Exception> {
+            FilenameIndex.getVirtualFilesByName(fileName, GlobalSearchScope.projectScope(project)).firstOrNull()
+        }
+
+        // If file doesn't exist, create it on disk under project base path
+        if (targetFile == null) {
+            val basePath = project.basePath ?: return ActionResult(false, "Cannot resolve project base path")
+            val newFile = File(basePath, targetPath)
+            newFile.parentFile.mkdirs()
+            newFile.writeText(code)
+            targetFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(newFile)
+                ?: return ActionResult(false, "File created on disk but VFS refresh failed")
         }
 
         var success = false
+        val vFile = targetFile
         ApplicationManager.getApplication().invokeAndWait {
-            if (targetFile != null) {
-                FileEditorManager.getInstance(project).openFile(targetFile, true)
-            }
+            FileEditorManager.getInstance(project).openFile(vFile, true)
             WriteCommandAction.runWriteCommandAction(project, "Celebrimbot Worker", "Celebrimbot", {
                 val editor = FileEditorManager.getInstance(project).selectedTextEditor
                 editor?.document?.setText(code)
                 success = editor?.document != null
             })
         }
-        return if (success) ActionResult(true, "<b>Celebrimbot:</b> ✅ Code written to ${task.target}")
-        else ActionResult(false, "Failed to write code to ${task.target}")
+        return if (success) ActionResult(true, "<b>Celebrimbot:</b> ✅ Code written to $targetPath")
+        else ActionResult(false, "Failed to write code to $targetPath")
     }
 
     private fun runTerminalAction(task: CelebrimbotTask): ActionResult {
@@ -231,7 +264,7 @@ class CelebrimbotAgentOrchestrator(private val project: Project) {
         )
         if (chatPatterns.any { lower.contains(it) }) return true
         // For ambiguous messages, ask the model
-        val routingPrompt = "<|im_start|>system\nAnswer ONLY with one word: CHAT or PLAN.\nCHAT = greetings, questions needing no file edits.\nPLAN = editing files, running commands, writing code.<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n"
+        val routingPrompt = "<|im_start|>system\n${CelebrimbotLlmService.loadPrompt("router_system_prompt.txt")}<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n"
         val embeddedEngine = CelebrimbotEmbeddedEngine.getInstance(project)
         return if (embeddedEngine.isModelDownloaded()) {
             val decision = embeddedEngine.askQuestion(routingPrompt, stopStrings = listOf("<|im_end|>", "<|im_start|>", "\n")).trim().uppercase()

@@ -118,6 +118,8 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
         }
 
         private var projectSkeleton: String = ""
+        private val conversationHistory = mutableListOf<Pair<String, String>>()
+        private val fullLog = mutableListOf<String>()
 
         init {
             ReadAction.nonBlocking<String> {
@@ -165,6 +167,18 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
             }
             header.add(titleBox, BorderLayout.WEST)
 
+            val copyButton = JButton("Copy").apply {
+                isContentAreaFilled = false
+                isBorderPainted = false
+                font = UIUtil.getLabelFont().deriveFont(11f)
+                foreground = mutedColor
+                cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                addActionListener {
+                    val text = fullLog.joinToString("\n")
+                    val selection = java.awt.datatransfer.StringSelection(text)
+                    Toolkit.getDefaultToolkit().systemClipboard.setContents(selection, null)
+                }
+            }
             val clearButton = JButton("Clear").apply {
                 isContentAreaFilled = false
                 isBorderPainted = false
@@ -175,9 +189,16 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
                     messagesPanel.removeAll()
                     messagesPanel.revalidate()
                     messagesPanel.repaint()
+                    conversationHistory.clear()
+                    fullLog.clear()
                 }
             }
-            header.add(clearButton, BorderLayout.EAST)
+            val headerButtons = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
+                isOpaque = false
+                add(copyButton)
+                add(clearButton)
+            }
+            header.add(headerButtons, BorderLayout.EAST)
             root.add(header, BorderLayout.NORTH)
 
             // ── Chat area ────────────────────────────────────────────────────
@@ -228,6 +249,7 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
             if (text.isEmpty()) return
 
             addUserBubble(text)
+            fullLog.add("You: $text")
             inputArea.text = ""
             scrollToBottom()
 
@@ -239,10 +261,19 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
                 "System Context: working in $fileName.\nSelected code:\n$selectedText\n\nUser: $text"
             else text
 
-            CelebrimbotAgentOrchestrator.getInstance(project).executePlan(prompt, projectSkeleton) { progress ->
+            conversationHistory.add("User" to text)
+            var botResponse = ""
+            CelebrimbotAgentOrchestrator.getInstance(project).executePlan(prompt, projectSkeleton, conversationHistory.toList()) { progress ->
                 ApplicationManager.getApplication().invokeLater {
                     addBotBubble(progress)
                     scrollToBottom()
+                    val plain = progress.replace(Regex("<[^>]+>"), "").trim()
+                    if (plain.isNotEmpty()) fullLog.add(plain)
+                    if (!progress.startsWith("<i>[") && !progress.startsWith("<i>⚙") &&
+                        !progress.startsWith("<i>🧠") && !progress.startsWith("<i>📄")) {
+                        botResponse = plain
+                        if (botResponse.isNotEmpty()) conversationHistory.add("Celebrimbot" to botResponse)
+                    }
                 }
             }
         }
@@ -288,20 +319,27 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
             headerColor: Color,
             compact: Boolean = false
         ): JPanel {
-            val pane = JTextPane().apply {
+            val maxBubbleWidth = 480
+            val pane = object : JTextPane() {
+                override fun getPreferredSize(): Dimension {
+                    // Force wrap at maxBubbleWidth by setting size before asking for preferred height
+                    val w = maxBubbleWidth - 20
+                    setSize(w, Short.MAX_VALUE.toInt())
+                    return Dimension(w, super.getPreferredSize().height)
+                }
+            }.apply {
                 contentType = "text/html"
                 editorKit = HTMLEditorKit()
                 isEditable = false
                 isOpaque = false
                 val fontSize = if (compact) 11 else 13
-                // Swing CSS only supports a very limited subset — no border-radius, no shorthand padding, no word-wrap
-                val css = "body { font-family: ${UIUtil.getLabelFont().family}; font-size: ${fontSize}pt; color: ${colorToHex(textColor)}; } " +
+                val css = "body { font-family: ${UIUtil.getLabelFont().family}; font-size: ${fontSize}pt; color: ${colorToHex(textColor)}; word-wrap: break-word; } " +
+                          "pre { white-space: pre-wrap; word-wrap: break-word; font-family: monospace; font-size: ${fontSize - 1}pt; margin: 0; } " +
                           "i { color: ${colorToHex(mutedColor)}; } " +
                           "b { color: ${colorToHex(textColor)}; } " +
                           "code { font-family: monospace; } "
                 (editorKit as HTMLEditorKit).styleSheet.addRule(css)
                 text = "<html><body>$body</body></html>"
-                maximumSize = Dimension(460, Int.MAX_VALUE)
             }
 
             val bubble = object : JPanel(BorderLayout()) {
@@ -315,6 +353,7 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
                 }
             }.apply {
                 isOpaque = false
+                maximumSize = Dimension(maxBubbleWidth, Int.MAX_VALUE)
                 border = JBUI.Borders.empty(if (compact) 4 else 8, 10)
                 if (header.isNotEmpty()) {
                     val headerLabel = JLabel(header).apply {
@@ -329,8 +368,6 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
 
             val row = JPanel(FlowLayout(align, 0, 0)).apply {
                 isOpaque = false
-                val maxWidth = 480
-                bubble.maximumSize = Dimension(maxWidth, Int.MAX_VALUE)
                 add(bubble)
             }
             return row

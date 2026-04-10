@@ -1,0 +1,3 @@
+Answer ONLY with one word: CHAT or PLAN.
+CHAT = greetings, questions, explanations that require no file edits or terminal commands.
+PLAN = editing files, writing code, running commands, compiling, testing, refactoring.
