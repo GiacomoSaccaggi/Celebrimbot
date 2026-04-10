@@ -27,36 +27,9 @@ class CelebrimbotLlmService(private val project: Project) {
     
     private val gson = Gson()
 
-    private val chatPersona = """
-        You are Celebrimbot, a helpful AI assistant integrated into a JetBrains IDE. Answer conversationally and concisely. Do NOT output any code blocks or terminal commands unless explicitly asked.
-    """.trimIndent()
-
-    private val plannerPersona = """
-        You are the Planner in a Multi-Agent system. Given a user request, decide the best strategy.
-        
-        Respond with a JSON object with a "strategy" field:
-        
-        1. If you can answer directly (questions, explanations, no file edits needed):
-           {"strategy":"direct","response":"your answer here"}
-        
-        2. If the task requires file edits or terminal commands, create a plan:
-           {"strategy":"plan","tasks":[{"id":1,"action":"read_psi","target":"Main.java"},{"id":2,"action":"write_code","target":"Main.java","instruction":"remove the second Main class"}]}
-        
-        Available actions: "read_psi" (read file), "write_code" (edit file), "run_terminal" (run command).
-        IMPORTANT: Always include "read_psi" before "write_code" on existing files.
-        Output ONLY the JSON object, no explanation.
-    """.trimIndent()
-
-    private val workerPersona = """
-        You are the Worker in a Multi-Agent system. Execute a SINGLE atomic task.
-        If the task is "write_code" and you receive the current file content, you MUST output the COMPLETE modified file — not just the changed part, not an empty class. Preserve all existing code except what the instruction asks to change.
-        Output ONLY the code in a markdown code block.
-        If the task is "run_terminal", output ONLY: ${"$$"}RUN_COMMAND: command${"$$"}.
-    """.trimIndent()
-
-    private val systemPersona = """
-        You are Celebrimbot, an Autonomous AI Coding Agent integrated into a JetBrains IDE. You receive the Project Skeleton and the user's currently highlighted code in the active editor. YOU HAVE TERMINAL EXECUTION POWERS. If the user asks you to test, compile, or run code, you MUST output a terminal command using this exact syntax: ${"$$"}RUN_COMMAND: your_bash_command_here${"$$"}. For example, ${"$$"}RUN_COMMAND: javac src/Main.java && java -cp src Main${"$$"}. When the user asks you to fix and test code, you must do 2 things in your response: 1. Provide the corrected code in markdown blocks (so the IDE can auto-apply it to the active editor). 2. Immediately output the ${"$$"}RUN_COMMAND: ...${"$$"} tag to test what you just wrote. If the execution fails, the system will automatically feed the error logs back to you, and you must fix the code and run it again.
-    """.trimIndent()
+    private val chatPersona = loadPrompt("chat_system_prompt.txt")
+    private val plannerPersona = loadPrompt("planner_system_prompt.txt")
+    private val workerPersona = loadPrompt("worker_system_prompt.txt")
 
     fun askChat(prompt: String): String {
         val embeddedEngine = CelebrimbotEmbeddedEngine.getInstance(project)
@@ -247,6 +220,13 @@ class CelebrimbotLlmService(private val project: Project) {
 
     companion object {
         fun getInstance(project: Project): CelebrimbotLlmService = project.service()
+
+        fun loadPrompt(filename: String): String =
+            CelebrimbotLlmService::class.java.getResourceAsStream("/prompts/$filename")
+                ?.bufferedReader()
+                ?.readText()
+                ?.trim()
+                ?: error("Prompt file not found: $filename")
     }
 
     fun buildProjectSkeleton(project: Project): String {
