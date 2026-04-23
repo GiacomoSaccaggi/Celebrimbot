@@ -70,6 +70,12 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
             horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
             background = bgColor
             viewport.background = bgColor
+            viewport.addComponentListener(object : java.awt.event.ComponentAdapter() {
+                override fun componentResized(e: java.awt.event.ComponentEvent) {
+                    messagesPanel.revalidate()
+                    messagesPanel.repaint()
+                }
+            })
         }
 
         private val inputArea = object : JTextArea() {
@@ -119,7 +125,11 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
 
         private var projectSkeleton: String = ""
         private val conversationHistory = mutableListOf<Pair<String, String>>()
-        private val fullLog = mutableListOf<String>()
+        private val fullLog = mutableListOf<String>() // ordered chronological log of everything
+        private val internalLog = mutableListOf<String>() // LLM prompt/response exchanges
+        private var localCount = 0
+        private var plannerCount = 0
+        private lateinit var statsLabel: JLabel
 
         init {
             ReadAction.nonBlocking<String> {
@@ -159,11 +169,17 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
                 font = UIUtil.getLabelFont().deriveFont(Font.PLAIN, 11f)
                 foreground = mutedColor
             }
+            statsLabel = JLabel("🖥️ 0  ☁️ 0").apply {
+                font = UIUtil.getLabelFont().deriveFont(Font.PLAIN, 10f)
+                foreground = mutedColor
+                toolTipText = "Local inferences / Planner (cloud) calls"
+            }
             val titleBox = JPanel().apply {
                 layout = BoxLayout(this, BoxLayout.Y_AXIS)
                 isOpaque = false
                 add(titleLabel)
                 add(subtitleLabel)
+                add(statsLabel)
             }
             header.add(titleBox, BorderLayout.WEST)
 
@@ -174,8 +190,9 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
                 foreground = mutedColor
                 cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
                 addActionListener {
-                    val text = fullLog.joinToString("\n")
-                    val selection = java.awt.datatransfer.StringSelection(text)
+                    val selection = java.awt.datatransfer.StringSelection(
+                        (fullLog + listOf("\n--- Internal Layer Exchanges ---") + internalLog).joinToString("\n")
+                    )
                     Toolkit.getDefaultToolkit().systemClipboard.setContents(selection, null)
                 }
             }
@@ -191,6 +208,10 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
                     messagesPanel.repaint()
                     conversationHistory.clear()
                     fullLog.clear()
+                    internalLog.clear()
+                    localCount = 0
+                    plannerCount = 0
+                    statsLabel.text = "🖥️ 0  ☁️ 0"
                 }
             }
             val headerButtons = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
@@ -257,25 +278,48 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
             val selectedText = editor?.selectionModel?.selectedText
             val fileName = editor?.virtualFile?.name
 
-            val prompt = if (!selectedText.isNullOrBlank() && fileName != null)
+            val prompt = if (!selectedText.isNullOrBlank() && fileName != null && selectedText.length > 20)
                 "System Context: working in $fileName.\nSelected code:\n$selectedText\n\nUser: $text"
             else text
 
             conversationHistory.add("User" to text)
-            var botResponse = ""
-            CelebrimbotAgentOrchestrator.getInstance(project).executePlan(prompt, projectSkeleton, conversationHistory.toList()) { progress ->
-                ApplicationManager.getApplication().invokeLater {
-                    addBotBubble(progress)
-                    scrollToBottom()
-                    val plain = progress.replace(Regex("<[^>]+>"), "").trim()
-                    if (plain.isNotEmpty()) fullLog.add(plain)
-                    if (!progress.startsWith("<i>[") && !progress.startsWith("<i>⚙") &&
-                        !progress.startsWith("<i>🧠") && !progress.startsWith("<i>📄")) {
-                        botResponse = plain
-                        if (botResponse.isNotEmpty()) conversationHistory.add("Celebrimbot" to botResponse)
+            val finalResponses = mutableListOf<String>()
+            CelebrimbotAgentOrchestrator.getInstance(project).executePlan(
+                prompt, projectSkeleton, conversationHistory.toList(),
+                onProgress = { progress ->
+                    ApplicationManager.getApplication().invokeLater {
+                        addBotBubble(progress)
+                        scrollToBottom()
+                        val plain = progress.replace(Regex("<[^>]+>"), "").trim()
+                        if (plain.isNotEmpty()) {
+                            fullLog.add(plain)
+                            if (!progress.startsWith("<i>")) finalResponses.add(plain)
+                        }
+                    }
+                },
+                onComplete = {
+                    ApplicationManager.getApplication().invokeLater {
+                        val summary = finalResponses
+                            .joinToString(" ")
+                            .replace(Regex("<[^>]+>"), "")
+                            .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&nbsp;", " ").replace("&#39;", "'").replace("&quot;", "\"")
+                            .replace(Regex("\\[[^\\]]*\\]\\s*"), "")
+                            .replace(Regex("Celebrimbot:\\s*"), "")
+                            .trim()
+                        if (summary.isNotEmpty()) conversationHistory.add("Celebrimbot" to summary)
+                    }
+                },
+                onInternalLog = { entry ->
+                    internalLog.add(entry)
+                },
+                onStats = { localDelta, plannerDelta ->
+                    ApplicationManager.getApplication().invokeLater {
+                        localCount += localDelta
+                        plannerCount += plannerDelta
+                        statsLabel.text = "🖥️ $localCount  ☁️ $plannerCount"
                     }
                 }
-            }
+            )
         }
 
         private fun addUserBubble(text: String) {
@@ -319,13 +363,11 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
             headerColor: Color,
             compact: Boolean = false
         ): JPanel {
-            val maxBubbleWidth = 480
             val pane = object : JTextPane() {
                 override fun getPreferredSize(): Dimension {
-                    // Force wrap at maxBubbleWidth by setting size before asking for preferred height
-                    val w = maxBubbleWidth - 20
-                    setSize(w, Short.MAX_VALUE.toInt())
-                    return Dimension(w, super.getPreferredSize().height)
+                    val availableWidth = (scrollPane.viewport.width - 32).coerceAtLeast(120)
+                    setSize(availableWidth, Short.MAX_VALUE.toInt())
+                    return Dimension(availableWidth, super.getPreferredSize().height)
                 }
             }.apply {
                 contentType = "text/html"
@@ -353,7 +395,7 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
                 }
             }.apply {
                 isOpaque = false
-                maximumSize = Dimension(maxBubbleWidth, Int.MAX_VALUE)
+                maximumSize = Dimension(Int.MAX_VALUE, Int.MAX_VALUE)
                 border = JBUI.Borders.empty(if (compact) 4 else 8, 10)
                 if (header.isNotEmpty()) {
                     val headerLabel = JLabel(header).apply {
@@ -366,9 +408,9 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
                 add(pane, BorderLayout.CENTER)
             }
 
-            val row = JPanel(FlowLayout(align, 0, 0)).apply {
+            val row = JPanel(BorderLayout()).apply {
                 isOpaque = false
-                add(bubble)
+                add(bubble, if (align == FlowLayout.RIGHT) BorderLayout.EAST else BorderLayout.WEST)
             }
             return row
         }
@@ -387,5 +429,28 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
             .replace("\n", "<br>")
 
         private fun colorToHex(c: Color) = "#%02x%02x%02x".format(c.red, c.green, c.blue)
+
+        private fun markdownToHtml(text: String): String {
+            var html = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            html = Regex("```[\\w]*\\n([\\s\\S]*?)```").replace(html) { "<pre><code>${it.groupValues[1]}</code></pre>" }
+            html = Regex("`([^`]+)`").replace(html) { "<code>${it.groupValues[1]}</code>" }
+            html = Regex("\\*\\*([^*]+)\\*\\*").replace(html) { "<b>${it.groupValues[1]}</b>" }
+            html = Regex("\\*([^*]+)\\*").replace(html) { "<i>${it.groupValues[1]}</i>" }
+            html = html.lines().joinToString("\n") { line ->
+                when {
+                    line.trimStart().startsWith("### ") -> "<b>${line.trimStart().removePrefix("### ")}</b>"
+                    line.trimStart().startsWith("## ")  -> "<b>${line.trimStart().removePrefix("## ")}</b>"
+                    line.trimStart().startsWith("# ")   -> "<b>${line.trimStart().removePrefix("# ")}</b>"
+                    line.trimStart().startsWith("- ")   -> "&nbsp;&nbsp;\u2022 ${line.trimStart().removePrefix("- ")}"
+                    line.trimStart().matches(Regex("\\d+\\. .*")) -> {
+                        val num = line.trimStart().substringBefore(". ")
+                        "&nbsp;&nbsp;<b>$num.</b> ${line.trimStart().substringAfter(". ")}"
+                    }
+                    else -> line
+                }
+            }
+            html = Regex("\\[([^]]+)]\\(([^)]+)\\)").replace(html) { "<a href='${it.groupValues[2]}'>${it.groupValues[1]}</a>" }
+            return html.replace("\n", "<br>")
+        }
     }
 }

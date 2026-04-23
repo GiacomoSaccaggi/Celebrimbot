@@ -31,11 +31,30 @@ repositories {
 }
 
 // Dependencies are managed with Gradle version catalog - read more: https://docs.gradle.org/current/userguide/version_catalogs.html
+val cliOnly by configurations.creating {
+    extendsFrom(configurations.compileOnly.get())
+}
+
 dependencies {
     implementation(libs.gson)
-    // java-llama.cpp — exclude coroutines pulled in transitively to avoid
-    // debug metadata version mismatch with the IDE's bundled kotlinx-coroutines
     implementation(libs.llama) {
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core-jvm")
+    }
+
+    compileOnly(libs.clikt)
+    compileOnly(libs.ktor.server.core)
+    compileOnly(libs.ktor.server.netty)
+    compileOnly(libs.ktor.server.content.negotiation)
+    compileOnly(libs.ktor.serialization.gson)
+
+    cliOnly(libs.clikt)
+    cliOnly(libs.ktor.server.core)
+    cliOnly(libs.ktor.server.netty)
+    cliOnly(libs.ktor.server.content.negotiation)
+    cliOnly(libs.ktor.serialization.gson)
+    cliOnly(libs.gson)
+    cliOnly(libs.llama) {
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core-jvm")
     }
@@ -146,9 +165,13 @@ tasks {
     }
 
     shadowJar {
-        // Exclude coroutines — use the ones bundled with the IDE to avoid metadata version mismatch
+        configurations = listOf(project.configurations.getByName("cliOnly"))
         exclude("kotlinx/coroutines/**")
         exclude("kotlin/coroutines/jvm/internal/DebugProbes*")
+        archiveFileName.set("celebrimbot.jar")
+        manifest {
+            attributes["Main-Class"] = "com.github.giacomosaccaggi.celebrimbot.cli.CelebrimbotCLIKt"
+        }
     }
 }
 
