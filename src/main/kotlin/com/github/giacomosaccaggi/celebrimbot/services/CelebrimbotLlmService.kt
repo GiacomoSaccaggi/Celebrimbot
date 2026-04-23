@@ -27,34 +27,53 @@ class CelebrimbotLlmService(private val project: Project) {
     
     private val gson = Gson()
 
-    private val chatPersona = loadPrompt("chat_system_prompt.txt")
-    private val plannerPersona = loadPrompt("planner_system_prompt.txt")
-    private val workerPersona = loadPrompt("worker_system_prompt.txt")
+    private val galadrielPersona = loadPrompt("galadriel_system_prompt.txt")
+    private val elrondPersona = loadPrompt("elrond_system_prompt.txt")
+    private val samwisePersona = loadPrompt("samwise_system_prompt.txt")
+    private val celebrimborPersona = loadPrompt("celebrimbor_system_prompt.txt")
 
     fun askChat(prompt: String): String {
         val embeddedEngine = CelebrimbotEmbeddedEngine.getInstance(project)
         if (embeddedEngine.isModelDownloaded()) {
-            val formatted = "<|im_start|>system\n$chatPersona<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n"
-            return "[🖥️ Local Qwen] " + embeddedEngine.askQuestion(formatted, stopStrings = listOf("<|im_end|>", "<|im_start|>"))
+            val formatted = "<|im_start|>system\n$galadrielPersona<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n"
+            return "[🧝 Galadriel] " + embeddedEngine.askQuestion(formatted, stopStrings = listOf("<|im_end|>", "<|im_start|>"))
         }
         val alibabaKey = CelebrimbotPasswordSafe.getAlibabaApiKey(project) ?: ""
         if (alibabaKey.isNotEmpty()) {
-            val result = callAlibabaResponses(prompt, chatPersona)
-            if (!result.startsWith("Error:")) return "[☁️ Alibaba Qwen] $result"
+            val result = callAlibabaResponses(prompt, galadrielPersona)
+            if (!result.startsWith("Error:")) return "[🧝 Galadriel] $result"
         }
-        return fallbackToEmbedded("<|im_start|>system\n$chatPersona<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n")
+        return fallbackToEmbedded("<|im_start|>system\n$galadrielPersona<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n")
     }
 
-    fun askPlanner(prompt: String): String {
+    fun askAragorn(prompt: String): String {
+        val aragornPersona = loadPrompt("aragorn_system_prompt.txt")
+        val embeddedEngine = CelebrimbotEmbeddedEngine.getInstance(project)
+        if (embeddedEngine.isModelDownloaded()) {
+            val formatted = "<|im_start|>system\n$aragornPersona<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n{"
+            return "{" + embeddedEngine.askQuestion(formatted, stopStrings = listOf("<|im_end|>", "<|im_start|>"))
+        }
+        return fallbackToEmbedded("<|im_start|>system\n$aragornPersona<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n{")
+    }
+
+        fun askElrond(prompt: String): String {
+        val embeddedEngine = CelebrimbotEmbeddedEngine.getInstance(project)
+        if (embeddedEngine.isModelDownloaded()) {
+            val formatted = "<|im_start|>system\n$elrondPersona<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n{"
+            return "{" + embeddedEngine.askQuestion(formatted, stopStrings = listOf("<|im_end|>", "<|im_start|>"))
+        }
+        return fallbackToEmbedded("<|im_start|>system\n$elrondPersona<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n{")
+    }
+
+    fun askCelebrimbor(prompt: String): String {
         val alibabaKey = CelebrimbotPasswordSafe.getAlibabaApiKey(project) ?: ""
         if (alibabaKey.isNotEmpty()) {
-            val result = callAlibabaResponses(prompt, plannerPersona)
+            val result = callAlibabaResponses(prompt, celebrimborPersona)
             if (!result.startsWith("Error:")) return result
         }
-        val geminiResult = callExternalLlm(prompt, plannerPersona, forcedGemini = true)
+        val geminiResult = callExternalLlm(prompt, celebrimborPersona, forcedGemini = true)
         if (!geminiResult.startsWith("Error:")) return geminiResult
-        // Fallback: embedded with JSON priming
-        val simplifiedPrompt = "<|im_start|>system\n$plannerPersona<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n{"
+        val simplifiedPrompt = "<|im_start|>system\n$celebrimborPersona<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n{"
         val embeddedEngine = CelebrimbotEmbeddedEngine.getInstance(project)
         if (embeddedEngine.isModelDownloaded()) {
             return "{" + embeddedEngine.askQuestion(simplifiedPrompt, stopStrings = listOf("<|im_end|>", "<|im_start|>"))
@@ -62,20 +81,58 @@ class CelebrimbotLlmService(private val project: Project) {
         return fallbackToEmbedded(simplifiedPrompt)
     }
 
-    fun askWorker(prompt: String): String {
+    fun askBilbo(conversationLog: String): String {
+        val embeddedEngine = CelebrimbotEmbeddedEngine.getInstance(project)
+        val bilboPersona = loadPrompt("bilbo_system_prompt.txt")
+        if (embeddedEngine.isModelDownloaded()) {
+            val formatted = "<|im_start|>system\n$bilboPersona<|im_end|>\n<|im_start|>user\n$conversationLog<|im_end|>\n<|im_start|>assistant\n"
+            return embeddedEngine.askQuestion(formatted, stopStrings = listOf("<|im_end|>", "<|im_start|>"))
+        }
+        return fallbackToEmbedded("<|im_start|>system\n$bilboPersona<|im_end|>\n<|im_start|>user\n$conversationLog<|im_end|>\n<|im_start|>assistant\n")
+    }
+
+    private val frodoPersona = loadPrompt("frodo_system_prompt.txt")
+    private val legolasGimliPersona = loadPrompt("legolas_gimli_system_prompt.txt")
+
+    fun askFrodo(prompt: String): String {
         val embeddedEngine = CelebrimbotEmbeddedEngine.getInstance(project)
         if (embeddedEngine.isModelDownloaded()) {
-            val formatted = "<|im_start|>system\n$workerPersona<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n"
+            val formatted = "<|im_start|>system\n$frodoPersona<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n"
             return embeddedEngine.askQuestion(formatted, stopStrings = listOf("<|im_end|>", "<|im_start|>"))
         }
         val alibabaKey = CelebrimbotPasswordSafe.getAlibabaApiKey(project) ?: ""
         if (alibabaKey.isNotEmpty()) {
-            val result = callAlibabaResponses(prompt, workerPersona)
+            val result = callAlibabaResponses(prompt, frodoPersona)
             if (!result.startsWith("Error:")) return result
         }
-        val result = callExternalLlm(prompt, workerPersona)
+        return fallbackToEmbedded("<|im_start|>system\n$frodoPersona<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n")
+    }
+
+    fun askLegolasGimli(prompt: String): String {
+        val alibabaKey = CelebrimbotPasswordSafe.getAlibabaApiKey(project) ?: ""
+        if (alibabaKey.isNotEmpty()) {
+            val result = callAlibabaResponses(prompt, legolasGimliPersona)
+            if (!result.startsWith("Error:")) return result
+        }
+        val geminiResult = callExternalLlm(prompt, legolasGimliPersona, forcedGemini = true)
+        if (!geminiResult.startsWith("Error:")) return geminiResult
+        return fallbackToEmbedded("<|im_start|>system\n$legolasGimliPersona<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n")
+    }
+
+    fun askSamwise(prompt: String): String {
+        val embeddedEngine = CelebrimbotEmbeddedEngine.getInstance(project)
+        if (embeddedEngine.isModelDownloaded()) {
+            val formatted = "<|im_start|>system\n$samwisePersona<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n"
+            return embeddedEngine.askQuestion(formatted, stopStrings = listOf("<|im_end|>", "<|im_start|>"))
+        }
+        val alibabaKey = CelebrimbotPasswordSafe.getAlibabaApiKey(project) ?: ""
+        if (alibabaKey.isNotEmpty()) {
+            val result = callAlibabaResponses(prompt, samwisePersona)
+            if (!result.startsWith("Error:")) return result
+        }
+        val result = callExternalLlm(prompt, samwisePersona)
         if (!result.startsWith("Error:")) return result
-        return fallbackToEmbedded("<|im_start|>system\n$workerPersona<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n")
+        return fallbackToEmbedded("<|im_start|>system\n$samwisePersona<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n")
     }
 
     private fun fallbackToEmbedded(fullPrompt: String): String {
@@ -91,7 +148,7 @@ class CelebrimbotLlmService(private val project: Project) {
     }
 
     fun askQuestion(prompt: String): String {
-        return askWorker(prompt) // Keep backward compatibility or refactor later
+        return askSamwise(prompt) // Keep backward compatibility or refactor later
     }
 
     private fun callAlibabaResponses(prompt: String, persona: String, tools: List<String> = emptyList()): String {

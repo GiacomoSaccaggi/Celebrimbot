@@ -29,9 +29,14 @@ class CelebrimbotEmbeddedEngine(private val project: Project) {
     private val modelDir = File(PathManager.getSystemPath(), "celebrimbot/models")
     private val executor = Executors.newSingleThreadExecutor()
 
+    private val minModelSizeBytes = 800_000_000L
+
     fun getModelFile(): File = File(modelDir, modelName)
 
-    fun isModelDownloaded(): Boolean = getModelFile().exists()
+    fun isModelDownloaded(): Boolean {
+        val file = getModelFile()
+        return file.exists() && file.length() >= minModelSizeBytes
+    }
 
     fun downloadModel(): CompletableFuture<Boolean> {
         val future = CompletableFuture<Boolean>()
@@ -39,6 +44,12 @@ class CelebrimbotEmbeddedEngine(private val project: Project) {
             LOG.info("Model already downloaded at ${modelDir.absolutePath}")
             future.complete(true)
             return future
+        }
+
+        val modelFile = getModelFile()
+        if (modelFile.exists()) {
+            LOG.warn("Partial/corrupted model file found (${modelFile.length()} bytes), deleting and re-downloading")
+            modelFile.delete()
         }
 
         try {
