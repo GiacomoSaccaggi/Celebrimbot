@@ -4,12 +4,11 @@ import de.kherud.llama.InferenceParameters
 import de.kherud.llama.LlamaModel
 import de.kherud.llama.ModelParameters
 import java.io.File
-import java.net.URL
+import java.net.URI
 import java.nio.file.Files
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 
 /**
  * Standalone implementation of LlmEngine using java-llama.cpp.
@@ -49,22 +48,16 @@ class StandaloneLlmEngine(private val modelDir: File, private val logger: (Strin
             try {
                 Files.createDirectories(modelDir.toPath())
                 logger("Downloading model from $modelUrl...")
-                val connection = URL(modelUrl).openConnection()
-                val inputStream = connection.getInputStream()
-                try {
-                    val outputStream = Files.newOutputStream(getModelFile().toPath())
-                    try {
+                val connection = URI(modelUrl).toURL().openConnection()
+                connection.getInputStream().use { inputStream ->
+                    Files.newOutputStream(getModelFile().toPath()).use { outputStream ->
                         val buffer = ByteArray(8192)
                         var bytesRead: Int = inputStream.read(buffer)
                         while (bytesRead != -1) {
                             outputStream.write(buffer, 0, bytesRead)
                             bytesRead = inputStream.read(buffer)
                         }
-                    } finally {
-                        outputStream.close()
                     }
-                } finally {
-                    inputStream.close()
                 }
                 logger("Model download complete.")
                 future.complete(true)
@@ -100,7 +93,7 @@ class StandaloneLlmEngine(private val modelDir: File, private val logger: (Strin
                 .setNGpuLayers(nGpuLayers)
             
             model = LlamaModel(modelParams)
-            logger("LlamaModel loaded with " + nGpuLayers + " GPU layers.")
+            logger("LlamaModel loaded with $nGpuLayers GPU layers.")
         } finally {
             currentThread.setContextClassLoader(oldLoader)
         }
@@ -114,7 +107,7 @@ class StandaloneLlmEngine(private val modelDir: File, private val logger: (Strin
             val response = StringBuilder()
             val params = InferenceParameters(prompt)
                 .setTemperature(0.7f)
-                .setNPredict(512)
+                .setNPredict(2048)
             
             val generator = m.generate(params).iterator()
             while (generator.hasNext()) {

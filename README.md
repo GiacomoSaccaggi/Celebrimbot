@@ -39,8 +39,12 @@ User Message
                Legolas & Gimli              master planner
                execute tasks                     |
                           |              Samwise / Frodo /
-                       Bilbo (Local)     Legolas & Gimli
-                       session summary   execute tasks
+                    Treebeard (Cloud)     Legolas & Gimli
+                    Ent Reviewer          execute tasks
+                    reflection loop            |
+                          |              Treebeard (Cloud)
+                       Bilbo (Local)     Ent Reviewer
+                       session summary   reflection loop
                                                      |
                                               Bilbo (Local)
                                               session summary
@@ -58,6 +62,7 @@ User Message
 | **Samwise** | Precise worker: executes mechanical tasks faithfully (delete, terminal, scan, git) | Local Qwen |
 | **Frodo** | Adventurous worker: handles all `write_code` tasks, fills gaps with hobbit-sense | Local Qwen |
 | **Legolas & Gimli** | Expert worker duo: called only for complex algorithms, large refactors, or tasks Frodo failed | Cloud (Alibaba / Gemini) |
+| **Treebeard** | Ent Reviewer: reviews completed work against the original request; triggers re-planning if incomplete; up to 2 reflection cycles before conceding to Bilbo | Cloud (Alibaba / Local fallback) |
 | **Bilbo** | Chronicler: writes a concise session summary, addresses user as "Mellow" | Local Qwen |
 
 ### Router Logic (Gandalf)
@@ -65,8 +70,8 @@ User Message
 | Decision | Meaning | Pipeline |
 |----------|---------|---------|
 | `CHAT` | Greeting, question, explanation | Galadriel |
-| `EASY_TASK` | Single self-contained action | Aragorn -> Samwise -> Bilbo |
-| `COMPLEX_TASK` | Multi-step, edit existing files, or repeated request | Elrond -> Celebrimbor -> Samwise -> Bilbo |
+| `EASY_TASK` | Single self-contained action (one file) | Aragorn → Workers → Treebeard → Bilbo |
+| `COMPLEX_TASK` | Multi-step, package creation, edit existing files, or repeated request | Elrond → Celebrimbor → Workers → Treebeard → Bilbo |
 
 Gandalf receives the full conversation history. If the same request has been asked before without success, it automatically escalates to `COMPLEX_TASK`.
 
@@ -82,6 +87,7 @@ Gandalf receives the full conversation history. If the same request has been ask
 | **Samwise** | Mechanical worker | Local Qwen | Alibaba Cloud | Gemini |
 | **Frodo** | Code worker (write_code) | Local Qwen | Alibaba Cloud | — |
 | **Legolas & Gimli** | Expert code worker | Alibaba Cloud | Gemini | Local Qwen |
+| **Treebeard** | Ent Reviewer (reflection) | Alibaba Cloud | Local Qwen | Safe fallback |
 | **Bilbo** | Summarizer | Local Qwen | — | — |
 
 The local model runs entirely on your machine via [java-llama.cpp](https://github.com/kherud/java-llama.cpp) — no internet required for most operations.
@@ -103,8 +109,14 @@ The local model runs entirely on your machine via [java-llama.cpp](https://githu
 - **Multi-provider fallback** — Alibaba Cloud (Qwen Plus) → Google Gemini → local model
 - **Secure credential storage** — API keys stored via IntelliJ PasswordSafe, never in plain text
 - **Per-project settings** — each project can use a different provider and model
-- **Standalone CLI** — `celebrimbot forge / scan / serve` for use outside the IDE
+- **Standalone CLI** — `celebrimbot forge / scan / serve / mcp-stdio / undo` for use outside the IDE
 - **HTTP bridge** — embedded Ktor server for remote invocation from other tools
+- **Dynamic Tool Registry** — all capabilities self-describe as JSON schemas; planners receive auto-generated tool lists, adding a new tool requires zero prompt editing
+- **Shadow Log (Auto-Undo)** — every file is backed up before being written or deleted; `celebrimbot undo` restores the last session from `.celebrimbot/shadow_log/`
+- **Council's Review (Validation Loop)** — after every `write_code`, the build command runs automatically; up to 3 self-correction cycles with error feedback before escalating
+- **Elrond's Palantír (BM25 Index)** — lightweight local semantic index; COMPLEX_TASK planning retrieves the top-8 relevant files instead of sending the full project skeleton
+- **MCP Bridge (Beacons of Gondor)** — MCP-compliant JSON-RPC 2.0 server over HTTP (`POST /mcp`) and Stdio (`celebrimbot mcp-stdio`) for Claude Desktop and other MCP hosts
+- **Treebeard (Ent Reviewer)** — critic agent between Workers and Bilbo; reviews completed work against the original request; triggers up to 2 re-planning cycles if incomplete; never hasty, never satisfied with placeholder code
 
 ---
 
@@ -113,7 +125,8 @@ The local model runs entirely on your machine via [java-llama.cpp](https://githu
 | Category | Action | Description |
 |----------|--------|-------------|
 | File | `read_psi` | Read file content |
-| File | `write_code` | Create or overwrite a file |
+| File | `write_code` | Create or overwrite a file (LLM-assisted) |
+| File | `write_file` | Create or overwrite a file (raw, no LLM — for MCP clients) |
 | File | `delete_file` | Delete a file |
 | Scan | `list_files` | List project files, optionally filtered by path/extension |
 | Scan | `grep_files` | Regex search across all files |
@@ -165,6 +178,7 @@ Open <kbd>Settings</kbd> → <kbd>Tools</kbd> → <kbd>Celebrimbot</kbd>
 | **Model Name** | e.g. `qwen-plus`, `gemini-1.5-flash` |
 | **API Key** | For Gemini or local OpenAI-compatible APIs |
 | **Alibaba Cloud API Key** | For Qwen Cloud (Responses API) |
+| **Validation Command** | Custom build command for the Council's Review loop (e.g. `./gradlew classes`). Leave empty to auto-detect from project marker files. |
 
 The local embedded model (`qwen2.5-coder-1.5b-instruct-q4_k_m.gguf`) is downloaded automatically to your IDE system directory on first inference. If a partial/corrupted download is detected, it is deleted and re-downloaded automatically.
 
@@ -239,8 +253,10 @@ The header shows `🖥️ N  ☁️ N` — local inference count vs cloud planne
 **CLI usage (after shadowJar):**
 ```bash
 java -jar build/libs/celebrimbot.jar forge "create a Python file with a fibonacci function"
-java -jar build/libs/celebrimbot.jar serve --port 16180
 java -jar build/libs/celebrimbot.jar scan
+java -jar build/libs/celebrimbot.jar serve --port 16180
+java -jar build/libs/celebrimbot.jar mcp-stdio
+java -jar build/libs/celebrimbot.jar undo
 ```
 
 ---
@@ -250,35 +266,51 @@ java -jar build/libs/celebrimbot.jar scan
 ```
 src/main/kotlin/.../celebrimbot/
 ├── cli/
-│   └── CelebrimbotCLI                # Standalone CLI (forge / scan / serve)
+│   └── CelebrimbotCLI                # Standalone CLI (forge / scan / serve / mcp-stdio / undo)
 ├── io/
 │   ├── FileOperator                  # Interface for file operations
 │   ├── IdeFileOperator               # PSI/VFS implementation (IDE mode)
 │   ├── HeadlessFileOperator          # java.nio implementation (standalone)
-│   ├── TerminalOperator              # Interface for terminal execution
+│   ├── ShadowLogOperator             # Interface for shadow log backup/undo
+│   ├── HeadlessShadowLogOperator     # java.nio shadow log implementation
+│   ├── ShadowedFileOperator          # Decorator: intercepts writes/deletes for backup
+│   ├── TerminalOperator              # Interface for terminal execution (returns TerminalResult)
 │   ├── IdeTerminalOperator           # IDE terminal implementation
 │   ├── HeadlessTerminalOperator      # ProcessBuilder implementation
 │   ├── LlmEngine                     # Interface for LLM inference
 │   ├── StandaloneLlmEngine           # llama.cpp standalone implementation
 │   ├── WebSearchOperator             # Interface for web search + fetch_page
 │   ├── DuckDuckGoSearchOperator      # DuckDuckGo implementation
-│   ├── ProjectScanOperator           # Interface for project scanning
+│   ├── ProjectScanOperator           # Interface for project scanning + walkSourceFiles
 │   ├── HeadlessProjectScanOperator   # java.nio implementation
 │   ├── GitOperator                   # Interface for git operations
 │   └── HeadlessGitOperator           # ProcessBuilder git implementation
+├── index/
+│   └── PalantirIndex                 # BM25 semantic index (build, query, save, load)
+├── mcp/
+│   ├── McpRouter                     # JSON-RPC 2.0 dispatcher (all MCP method handlers)
+│   └── McpTransport                  # Compact JSON-RPC response/error formatting
 ├── model/
-│   └── CelebrimbotPlan               # CelebrimbotTask / CelebrimbotPlan data classes
+│   ├── CelebrimbotPlan               # CelebrimbotTask data class
+│   ├── CelebrimbotTool               # CelebrimbotTool interface, ToolParam, ToolResult, ToolCategory
+│   └── TreebeardReviewResult         # Treebeard's verdict: isComplete, reasoning, additionalRequests
+├── registry/
+│   ├── ToolRegistry                  # Central tool vault with toJsonSchema() and toMcpToolList()
+│   └── tools/
+│       └── Tools                     # 15 tool implementations wrapping all operators
 ├── services/
-│   ├── CelebrimbotAgentOrchestrator  # Multi-agent loop: routing, planning, execution
+│   ├── CelebrimbotAgentOrchestrator  # Multi-agent loop: routing, planning, execution, reflection
 │   ├── CelebrimbotLlmService         # AI provider abstraction (local/Alibaba/Gemini)
 │   ├── CelebrimbotEmbeddedEngine     # Local llama.cpp inference engine
-│   └── CelebrimbotTerminalService    # IDE terminal command execution
+│   ├── CelebrimbotTerminalService    # IDE terminal command execution
+│   ├── ValidationService             # Build system detection + Council's Review command
+│   └── TreebeardReviewService        # Ent Reviewer: reflection loop after Workers
 ├── settings/
 │   ├── CelebrimbotSettingsState      # Persistent per-project configuration
 │   ├── CelebrimbotSettingsConfigurable # Settings UI panel
 │   └── CelebrimbotPasswordSafe       # Secure API key storage
 ├── startup/
-│   └── CelebrimbotStartupActivity    # Plugin initialization and model warm-up
+│   └── CelebrimbotStartupActivity    # Plugin init, model warm-up, Palantír index refresh
 ├── toolWindow/
 │   └── CelebrimbotToolWindowFactory  # Chat UI panel with stats counter and copy/clear
 └── MyBundle.kt                       # i18n resource bundle accessor
@@ -293,6 +325,7 @@ src/main/resources/
 │   ├── samwise_system_prompt.txt     # Precise worker persona
 │   ├── frodo_system_prompt.txt       # Adventurous worker persona (write_code)
 │   ├── legolas_gimli_system_prompt.txt # Expert worker duo persona (complex tasks)
+│   ├── treebeard_system_prompt.txt   # Ent Reviewer persona: slow, methodical, strict JSON output
 │   └── bilbo_system_prompt.txt       # Session chronicler persona
 ├── icons/
 │   └── celebrimbot.svg

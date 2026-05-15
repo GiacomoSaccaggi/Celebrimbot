@@ -7,6 +7,7 @@ import org.jetbrains.annotations.PropertyKey
 @NonNls
 private const val BUNDLE = "messages.MyBundle"
 
+@Suppress("unused") // Registered as resource-bundle in plugin.xml; accessed reflectively by the platform
 object MyBundle : DynamicBundle(BUNDLE) {
 
     @JvmStatic

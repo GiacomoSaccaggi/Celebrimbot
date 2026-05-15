@@ -11,7 +11,3 @@ data class CelebrimbotTask(
     val extension: String? = null,
     val worker: String? = null  // "frodo" for intelligent worker, null/omitted = Samwise
 )
-
-data class CelebrimbotPlan(
-    val tasks: List<CelebrimbotTask>
-)
