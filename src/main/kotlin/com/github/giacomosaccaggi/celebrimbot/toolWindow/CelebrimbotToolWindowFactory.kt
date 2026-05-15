@@ -20,7 +20,6 @@ import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.awt.geom.RoundRectangle2D
 import javax.swing.*
-import javax.swing.text.html.HTMLDocument
 import javax.swing.text.html.HTMLEditorKit
 
 class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
@@ -36,11 +35,26 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
                 override fun stateChanged(toolWindowManager: com.intellij.openapi.wm.ToolWindowManager) {
                     val tw = toolWindowManager.getToolWindow("Celebrimbot")
                     if (tw != null && !tw.isVisible) {
+                        // Unload the currently selected model when the panel is hidden
                         CelebrimbotEmbeddedEngine.getInstance(project).unloadModel()
                     }
                 }
             }
         )
+
+        // Release all cached models when the project closes.
+        // ProjectManagerListener.TOPIC was removed in 2024.x; use the
+        // ProjectManager instance API with a project-scoped disposable instead.
+        com.intellij.openapi.project.ProjectManager.getInstance()
+            .addProjectManagerListener(
+                project,
+                object : com.intellij.openapi.project.ProjectManagerListener {
+                    override fun projectClosing(closingProject: Project) {
+                        com.github.giacomosaccaggi.celebrimbot.services.LocalModelManager
+                            .getInstance(project).forceUnloadAll()
+                    }
+                }
+            )
     }
 
     class CelebrimbotChatToolWindow(private val project: Project) {
@@ -303,7 +317,7 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
                             .joinToString(" ")
                             .replace(Regex("<[^>]+>"), "")
                             .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&nbsp;", " ").replace("&#39;", "'").replace("&quot;", "\"")
-                            .replace(Regex("\\[[^\\]]*\\]\\s*"), "")
+                            .replace(Regex("\\[[^]]*]\\s*"), "")
                             .replace(Regex("Celebrimbot:\\s*"), "")
                             .trim()
                         if (summary.isNotEmpty()) conversationHistory.add("Celebrimbot" to summary)
@@ -429,28 +443,5 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
             .replace("\n", "<br>")
 
         private fun colorToHex(c: Color) = "#%02x%02x%02x".format(c.red, c.green, c.blue)
-
-        private fun markdownToHtml(text: String): String {
-            var html = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            html = Regex("```[\\w]*\\n([\\s\\S]*?)```").replace(html) { "<pre><code>${it.groupValues[1]}</code></pre>" }
-            html = Regex("`([^`]+)`").replace(html) { "<code>${it.groupValues[1]}</code>" }
-            html = Regex("\\*\\*([^*]+)\\*\\*").replace(html) { "<b>${it.groupValues[1]}</b>" }
-            html = Regex("\\*([^*]+)\\*").replace(html) { "<i>${it.groupValues[1]}</i>" }
-            html = html.lines().joinToString("\n") { line ->
-                when {
-                    line.trimStart().startsWith("### ") -> "<b>${line.trimStart().removePrefix("### ")}</b>"
-                    line.trimStart().startsWith("## ")  -> "<b>${line.trimStart().removePrefix("## ")}</b>"
-                    line.trimStart().startsWith("# ")   -> "<b>${line.trimStart().removePrefix("# ")}</b>"
-                    line.trimStart().startsWith("- ")   -> "&nbsp;&nbsp;\u2022 ${line.trimStart().removePrefix("- ")}"
-                    line.trimStart().matches(Regex("\\d+\\. .*")) -> {
-                        val num = line.trimStart().substringBefore(". ")
-                        "&nbsp;&nbsp;<b>$num.</b> ${line.trimStart().substringAfter(". ")}"
-                    }
-                    else -> line
-                }
-            }
-            html = Regex("\\[([^]]+)]\\(([^)]+)\\)").replace(html) { "<a href='${it.groupValues[2]}'>${it.groupValues[1]}</a>" }
-            return html.replace("\n", "<br>")
-        }
     }
 }

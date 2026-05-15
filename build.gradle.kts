@@ -30,6 +30,22 @@ repositories {
     }
 }
 
+// Force Netty to a patched version to resolve CVEs in the transitive dependency
+// pulled in by ktor-server-netty.
+// Highest patched version required: 4.1.132.Final (CVE-2026-33871, CVE-2026-33870)
+// All modules pinned to the same version for consistency.
+configurations.all {
+    resolutionStrategy.force(
+        "io.netty:netty-codec-http2:4.1.132.Final",
+        "io.netty:netty-codec-http:4.1.132.Final",
+        "io.netty:netty-handler:4.1.132.Final",
+        "io.netty:netty-codec:4.1.132.Final",
+        "io.netty:netty-common:4.1.132.Final",
+        "io.netty:netty-transport:4.1.132.Final",
+        "io.netty:netty-buffer:4.1.132.Final"
+    )
+}
+
 // Dependencies are managed with Gradle version catalog - read more: https://docs.gradle.org/current/userguide/version_catalogs.html
 val cliOnly by configurations.creating {
     extendsFrom(configurations.compileOnly.get())
@@ -134,6 +150,16 @@ intellijPlatform {
         ides {
             recommended()
         }
+        // Clikt and Ktor are CLI-only dependencies bundled exclusively in the Shadow JAR.
+        // They are declared compileOnly so they are absent from the plugin ZIP — the verifier
+        // correctly detects them as unresolved, but they will never be loaded by the IDE.
+        // externalPrefixes tells the verifier to skip "No such class" for these packages.
+        externalPrefixes.addAll(
+            "com.github.ajalt.clikt",
+            "io.ktor.server",
+            "io.ktor.serialization.gson",
+            "io.ktor.util.reflect"
+        )
     }
 }
 

@@ -12,7 +12,7 @@ import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import java.io.File
-import java.net.URL
+import java.net.URI
 import java.nio.file.Files
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
@@ -21,17 +21,19 @@ import java.util.concurrent.TimeoutException
 
 @Service(Service.Level.PROJECT)
 class CelebrimbotEmbeddedEngine(private val project: Project) {
-    private val LOG = Logger.getInstance(CelebrimbotEmbeddedEngine::class.java)
-    private val modelName = "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
-    private val modelUrl = "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
-    
+    private val log = Logger.getInstance(CelebrimbotEmbeddedEngine::class.java)
     private var model: LlamaModel? = null
     private val modelDir = File(PathManager.getSystemPath(), "celebrimbot/models")
     private val executor = Executors.newSingleThreadExecutor()
 
     private val minModelSizeBytes = 800_000_000L
 
-    fun getModelFile(): File = File(modelDir, modelName)
+    /** Returns the currently selected model from settings. */
+    private fun selectedModel(): com.github.giacomosaccaggi.celebrimbot.settings.LocalAiModel =
+        com.github.giacomosaccaggi.celebrimbot.settings.CelebrimbotSettingsState
+            .getInstance(project).state.selectedLocalModel
+
+    fun getModelFile(): File = File(modelDir, selectedModel().fileName)
 
     fun isModelDownloaded(): Boolean {
         val file = getModelFile()
@@ -41,34 +43,34 @@ class CelebrimbotEmbeddedEngine(private val project: Project) {
     fun downloadModel(): CompletableFuture<Boolean> {
         val future = CompletableFuture<Boolean>()
         if (isModelDownloaded()) {
-            LOG.info("Model already downloaded at ${modelDir.absolutePath}")
+            log.info("Model already downloaded at ${modelDir.absolutePath}")
             future.complete(true)
             return future
         }
 
         val modelFile = getModelFile()
         if (modelFile.exists()) {
-            LOG.warn("Partial/corrupted model file found (${modelFile.length()} bytes), deleting and re-downloading")
+            log.warn("Partial/corrupted model file found (${modelFile.length()} bytes), deleting and re-downloading")
             modelFile.delete()
         }
 
         try {
             Files.createDirectories(modelDir.toPath())
         } catch (e: Exception) {
-            LOG.error("Failed to create model directory", e)
+            log.error("Failed to create model directory", e)
             future.completeExceptionally(e)
             return future
         }
 
-        LOG.info("Starting model download: $modelUrl")
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Celebrimbot: Forging Local AI (Downloading Qwen...)") {
+        log.info("Starting model download: ${selectedModel().downloadUrl}")
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Celebrimbot: forging local AI (downloading Qwen...)") {
             override fun run(indicator: ProgressIndicator) {
                 try {
-                    downloadFile(modelUrl, getModelFile(), indicator, "GGUF Model")
-                    LOG.info("Model download finished successfully")
+                    downloadFile(indicator)
+                    log.info("Model download finished successfully")
                     future.complete(true)
                 } catch (e: Exception) {
-                    LOG.error("Failed to download model file", e)
+                    log.error("Failed to download model file", e)
                     future.completeExceptionally(e)
                 }
             }
@@ -76,11 +78,13 @@ class CelebrimbotEmbeddedEngine(private val project: Project) {
         return future
     }
 
-    private fun downloadFile(url: String, file: File, indicator: ProgressIndicator, name: String) {
+    private fun downloadFile(indicator: ProgressIndicator) {
+        val file = getModelFile()
         if (file.exists()) return
-        
-        LOG.info("Downloading $name from $url")
-        val connection = URL(url).openConnection()
+
+        val model = selectedModel()
+        log.info("Downloading GGUF model from ${model.downloadUrl}")
+        val connection = URI(model.downloadUrl).toURL().openConnection()
         val totalSize = connection.contentLengthLong
         
         connection.getInputStream().use { input ->
@@ -91,15 +95,15 @@ class CelebrimbotEmbeddedEngine(private val project: Project) {
                 
                 while (input.read(buffer).also { bytesRead = it } != -1) {
                     if (indicator.isCanceled) {
-                        LOG.info("$name download canceled by user")
+                        log.info("GGUF model download canceled by user")
                         file.delete()
-                        throw InterruptedException("$name download canceled")
+                        throw InterruptedException("GGUF model download canceled")
                     }
                     output.write(buffer, 0, bytesRead)
                     totalBytesRead += bytesRead
                     if (totalSize > 0) {
                         indicator.fraction = totalBytesRead.toDouble() / totalSize
-                        indicator.text = "Downloading $name: ${(totalBytesRead / 1024)}KB / ${(totalSize / 1024)}KB"
+                        indicator.text = "Downloading GGUF model: ${totalBytesRead / 1024}KB / ${totalSize / 1024}KB"
                     }
                 }
             }
@@ -108,83 +112,68 @@ class CelebrimbotEmbeddedEngine(private val project: Project) {
 
     @Synchronized
     fun loadModel() {
-        if (model != null) {
-            LOG.info("Model already loaded in memory")
-            return
-        }
-        
-        val file = getModelFile()
-        if (!file.exists()) {
-            LOG.warn("Cannot load model: GGUF file not found at ${file.absolutePath}")
-            throw IllegalStateException("Model GGUF file not found at ${file.absolutePath}")
-        }
-        
-        LOG.info("Loading LlamaModel into RAM from ${file.absolutePath}...")
-        
-        val currentThread = Thread.currentThread()
-        val oldLoader = currentThread.contextClassLoader
+        // Delegate to LocalModelManager — it handles lazy loading and caching
         try {
-            currentThread.contextClassLoader = javaClass.classLoader
-            
-            val modelParams = ModelParameters()
-                .setModelFilePath(file.absolutePath)
-                .setNGpuLayers(0)
-            
-            model = LlamaModel(modelParams)
-            LOG.info("LlamaModel successfully loaded into RAM")
-        } catch (e: Throwable) {
-            val errorMessage = "Failed to load GGUF model from ${file.absolutePath}: ${e.message}"
-            LOG.error(errorMessage, e)
-            throw RuntimeException(errorMessage, e)
-        } finally {
-            currentThread.contextClassLoader = oldLoader
+            LocalModelManager.getInstance(project).getOrLoadModel(selectedModel())
+            log.info("Model available via LocalModelManager")
+        } catch (e: Exception) {
+            log.error("loadModel() failed", e)
+            throw e
         }
     }
 
     @Synchronized
     fun unloadModel() {
-        if (model != null) {
-            LOG.info("Unloading LlamaModel from RAM...")
-            model?.close()
-            model = null
-            System.gc()
-            LOG.info("Model unloaded")
-        }
+        // Unload only the currently selected model from the cache
+        LocalModelManager.getInstance(project).forceUnload(selectedModel())
+        // Also clear the legacy single-model field for backward compatibility
+        model?.close()
+        model = null
+        System.gc()
+        log.info("Model unloaded via LocalModelManager")
     }
 
     fun askQuestion(prompt: String, stopStrings: List<String> = emptyList()): String {
-        LOG.info("Inference request received")
-        
+        log.info("Inference request received")
+
         val future = CompletableFuture.supplyAsync({
-            synchronized(this) {
-                if (model == null) loadModel()
+            // Resolve the model to use for this inference
+            val modelEnum = selectedModel()
+            val manager = LocalModelManager.getInstance(project)
+            val m = try {
+                manager.getOrLoadModel(modelEnum)
+            } catch (e: Exception) {
+                log.error("Failed to load model via LocalModelManager", e)
+                throw e
             }
-            
-            val m = model ?: throw IllegalStateException("Model not loaded")
-            LOG.info("Inference started...")
+
+            log.info("Inference started...")
             val response = StringBuilder()
-            
+
             val inferenceParams = InferenceParameters(prompt)
                 .setTemperature(0.7f)
-                .setNPredict(256)
+                .setNPredict(2048)
                 .apply { if (stopStrings.isNotEmpty()) setStopStrings(*stopStrings.toTypedArray()) }
-            
+
             for (output in m.generate(inferenceParams)) {
                 response.append(output.text)
             }
-            
-            LOG.info("Inference finished")
+
+            // Touch the cache entry so the TTL clock resets after a successful inference
+            manager.touch(modelEnum)
+
+            log.info("Inference finished")
             response.toString().trim()
         }, executor)
 
         return try {
             future.get(45, TimeUnit.SECONDS) // Slightly longer for Llama.cpp load+infer
-        } catch (e: TimeoutException) {
-            LOG.warn("Inference timed out after 45 seconds")
+        } catch (_: TimeoutException) {
+            log.warn("Inference timed out after 45 seconds")
             "System: Local engine is too slow or stuck"
         } catch (e: Throwable) {
             val errorMessage = "Inference failed: ${e.message}"
-            LOG.error(errorMessage, e)
+            log.error(errorMessage, e)
             "Error: ${e.message}"
         }
     }

@@ -7,10 +7,10 @@ import java.util.concurrent.CompletableFuture
 /**
  * IDE implementation of TerminalOperator.
  */
-class IdeTerminalOperator(private val project: Project) : TerminalOperator {
+class IdeTerminalOperator(project: Project) : TerminalOperator {
     private val terminalService = CelebrimbotTerminalService.getInstance(project)
 
-    override fun executeCommand(command: String): CompletableFuture<String> {
+    override fun executeCommand(command: String): CompletableFuture<TerminalResult> {
         return terminalService.executeCommand(command)
     }
 }

@@ -3,12 +3,6 @@ package com.github.giacomosaccaggi.celebrimbot.settings
 import com.intellij.openapi.components.*
 import com.intellij.openapi.project.Project
 
-enum class AiProvider {
-    GOOGLE_GEMINI,
-    LOCAL_API,
-    ALIBABA_QWEN
-}
-
 @Service(Service.Level.PROJECT)
 @State(
     name = "CelebrimbotSettingsState",
@@ -17,9 +11,14 @@ enum class AiProvider {
 class CelebrimbotSettingsState : PersistentStateComponent<CelebrimbotSettingsState.State> {
 
     class State {
-        var provider: AiProvider = AiProvider.LOCAL_API
-        var baseUrl: String = "http://localhost:11434/v1/chat/completions"
-        var modelName: String = "qwen2.5-coder:1.5b"
+        var validationCommand: String = ""
+        var selectedLocalModel: LocalAiModel = LocalAiModel.QWEN_7B
+
+        // ── Per-character agent configuration ─────────────────────────────────
+        // Stored as Map<characterKey, AgentConfigDto> so IntelliJ's XML
+        // serialiser can round-trip it without custom converters.
+        // Access the rich AgentConfig via CelebrimbotSettingsState.getAgentConfig().
+        var agentConfigs: LinkedHashMap<String, AgentConfigDto> = buildDefaultAgentConfigs()
     }
 
     private var myState = State()
@@ -28,9 +27,33 @@ class CelebrimbotSettingsState : PersistentStateComponent<CelebrimbotSettingsSta
 
     override fun loadState(state: State) {
         myState = state
+        // Back-fill any characters that were added after the user's last save
+        AgentConfig.ALL_CHARACTERS.forEach { key ->
+            myState.agentConfigs.putIfAbsent(key, AgentConfig.defaultFor(key).toDto())
+        }
+    }
+
+    // ── Convenience accessors ─────────────────────────────────────────────────
+
+    /** Returns the [AgentConfig] for [character], falling back to the default. */
+    fun getAgentConfig(character: String): AgentConfig =
+        myState.agentConfigs[character]?.toConfig() ?: AgentConfig.defaultFor(character)
+
+    /** Persists an [AgentConfig] for [character]. */
+    fun setAgentConfig(character: String, config: AgentConfig) {
+        myState.agentConfigs[character] = config.toDto()
     }
 
     companion object {
         fun getInstance(project: Project): CelebrimbotSettingsState = project.service()
     }
 }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+private fun buildDefaultAgentConfigs(): LinkedHashMap<String, AgentConfigDto> =
+    LinkedHashMap<String, AgentConfigDto>().also { map ->
+        AgentConfig.ALL_CHARACTERS.forEach { key ->
+            map[key] = AgentConfig.defaultFor(key).toDto()
+        }
+    }

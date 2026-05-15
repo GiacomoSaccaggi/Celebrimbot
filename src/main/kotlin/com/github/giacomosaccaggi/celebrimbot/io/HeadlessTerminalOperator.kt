@@ -10,41 +10,40 @@ import java.util.concurrent.TimeUnit
  */
 class HeadlessTerminalOperator(private val basePath: String) : TerminalOperator {
 
-    override fun executeCommand(command: String): CompletableFuture<String> {
-        val future = CompletableFuture<String>()
-        
+    override fun executeCommand(command: String): CompletableFuture<TerminalResult> {
+        val future = CompletableFuture<TerminalResult>()
+
         Thread {
             try {
                 val processBuilder = ProcessBuilder("/bin/sh", "-c", command)
                     .directory(java.io.File(basePath))
                     .redirectErrorStream(true)
-                
+
                 val process = processBuilder.start()
                 val output = StringBuilder()
-                
+
                 val reader = BufferedReader(InputStreamReader(process.inputStream))
-                try {
-                    var line: String? = reader.readLine()
+                reader.use {
+                    var line: String? = it.readLine()
                     while (line != null) {
                         output.append(line).append("\n")
-                        line = reader.readLine()
+                        line = it.readLine()
                     }
-                } finally {
-                    reader.close()
                 }
-                
+
                 val finished = process.waitFor(30, TimeUnit.SECONDS)
-                if (!finished) {
+                val exitCode = if (finished) process.exitValue() else {
                     process.destroy()
                     output.append("\n[TIMEOUT WARNING: Process killed after 30 seconds]")
+                    -1
                 }
-                
-                future.complete(output.toString())
+
+                future.complete(TerminalResult(output.toString(), exitCode))
             } catch (e: Exception) {
                 future.completeExceptionally(e)
             }
         }.start()
-        
+
         return future
     }
 }

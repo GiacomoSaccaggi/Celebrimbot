@@ -9,6 +9,12 @@ interface ProjectScanOperator {
     fun grepFiles(pattern: String, extension: String? = null): String
     fun findByName(name: String): String
     fun fileStats(target: String): String
+    /**
+     * Returns relative paths of all indexable source files under the project root.
+     * Skips ignored directories, binary files, and files larger than 100 KB.
+     * Used exclusively by the Palantír indexer.
+     */
+    fun walkSourceFiles(): List<String>
 }
 
 class HeadlessProjectScanOperator(private val basePath: String) : ProjectScanOperator {
@@ -82,9 +88,53 @@ class HeadlessProjectScanOperator(private val basePath: String) : ProjectScanOpe
             val lines = file.readLines()
             val size = file.length()
             val blank = lines.count { it.isBlank() }
-            "File: $target\nSize: ${size} bytes\nLines: ${lines.size}\nBlank lines: $blank\nCode lines: ${lines.size - blank}"
+            "File: $target\nSize: $size bytes\nLines: ${lines.size}\nBlank lines: $blank\nCode lines: ${lines.size - blank}"
         } catch (e: Exception) {
             "Error: ${e.message}"
         }
+    }
+
+    override fun walkSourceFiles(): List<String> {
+        val base = Paths.get(basePath)
+        return try {
+            Files.walk(base)
+                .filter { Files.isRegularFile(it) }
+                .filter { path ->
+                    val s = path.toString()
+                    IGNORED_DIRS.none { s.contains(it) }
+                }
+                .filter { path ->
+                    val ext = path.fileName.toString().substringAfterLast('.', "")
+                    SOURCE_EXTENSIONS.contains(ext)
+                }
+                .filter { Files.size(it) <= MAX_FILE_BYTES }
+                .filter { !isBinary(it.toFile()) }
+                .map { base.relativize(it).toString() }
+                .sorted()
+                .toList()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    companion object {
+        private const val MAX_FILE_BYTES = 102_400L  // 100 KB
+        private val IGNORED_DIRS = listOf(
+            "/.git/", "/build/", "/node_modules/", "/.gradle/", "/.idea/",
+            "/dist/", "/out/", "/.celebrimbot/"
+        )
+        private val SOURCE_EXTENSIONS = setOf(
+            "kt", "java", "py", "js", "ts", "tsx", "jsx",
+            "rs", "go", "c", "cpp", "cc", "h", "hpp",
+            "cs", "rb", "scala", "swift", "php", "kts"
+        )
+        /** Detects binary files by looking for a null byte in the first 512 bytes. */
+        private fun isBinary(file: File): Boolean = try {
+            file.inputStream().use { stream ->
+                val buf = ByteArray(512)
+                val read = stream.read(buf)
+                (0 until read).any { buf[it] == 0.toByte() }
+            }
+        } catch (_: Exception) { false }
     }
 }
