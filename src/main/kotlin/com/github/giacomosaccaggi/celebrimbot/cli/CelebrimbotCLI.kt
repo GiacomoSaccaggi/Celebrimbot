@@ -14,7 +14,10 @@ import com.github.giacomosaccaggi.celebrimbot.registry.tools.*
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.clikt.parameters.arguments.argument
+import com.github.giacomosaccaggi.celebrimbot.eval.AmazonQHeadlessProvider
+import com.github.giacomosaccaggi.celebrimbot.eval.EvalRunner
 import com.github.ajalt.clikt.parameters.options.default
+import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.int
 import io.ktor.http.*
@@ -210,10 +213,39 @@ class UndoCommand : CliktCommand(help = "Reverts the last Shadow Log session.") 
     }
 }
 
+// ── eval ─────────────────────────────────────────────────────────────────────
+
+class EvalCommand : CliktCommand(help = "Runs the LLM-as-a-Judge eval suite against the agent pipeline.") {
+    val suite by option("--suite", help = "Path to eval_suite.json").default("src/test/testData/eval/eval_suite.json")
+    val output by option("--output", help = "Output directory for reports").default("build/eval")
+
+    override fun run() {
+        val suiteFile = File(suite).let { if (it.isAbsolute) it else File(System.getProperty("user.dir"), suite) }
+        val outputDir = File(output).let { if (it.isAbsolute) it else File(System.getProperty("user.dir"), output) }
+
+        if (!suiteFile.exists()) {
+            echo("\u001B[31m[Eval] Suite file not found: ${suiteFile.absolutePath}\u001B[0m")
+            return
+        }
+
+        echo("\u001B[35m[Eval] Starting eval suite: ${suiteFile.name}\u001B[0m")
+        echo("\u001B[35m[Eval] Output: ${outputDir.absolutePath}\u001B[0m")
+
+        val provider = AmazonQHeadlessProvider()
+        val runner = EvalRunner(provider)
+        val results = runner.runSuite(suiteFile, outputDir)
+
+        val passed = results.count { it.judgeVerdict.passed }
+        val total = results.size
+        val color = if (passed == total) "\u001B[32m" else if (passed > total / 2) "\u001B[33m" else "\u001B[31m"
+        echo("${color}[Eval] Done: $passed/$total passed\u001B[0m")
+    }
+}
+
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
 fun main(args: Array<String>) = CelebrimbotCLI()
-    .subcommands(ForgeCommand(), ScanCommand(), ServeCommand(), McpStdioCommand(), UndoCommand())
+    .subcommands(ForgeCommand(), ScanCommand(), ServeCommand(), McpStdioCommand(), UndoCommand(), EvalCommand())
     .main(args)
 
 // ── Shared factory ────────────────────────────────────────────────────────────

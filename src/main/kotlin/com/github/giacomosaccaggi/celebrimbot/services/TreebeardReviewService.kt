@@ -60,69 +60,10 @@ class TreebeardReviewService(private val project: Project) {
      * Treebeard prefers the cloud planner (Alibaba → Gemini) for his deep
      * reflection, but falls back to the local model if needed.
      */
-    private fun askTreebeard(prompt: String): String {
-        val alibabaKey = com.github.giacomosaccaggi.celebrimbot.settings.CelebrimbotPasswordSafe
-            .getAlibabaApiKey(project) ?: ""
-        if (alibabaKey.isNotEmpty()) {
-            // Reuse the Alibaba path via a thin wrapper — Treebeard uses the same
-            // HTTP infrastructure as Celebrimbor.
-            val result = callAlibabaForTreebeard(prompt)
-            if (!result.startsWith("Error:")) return result
+    private fun askTreebeard(prompt: String): String =
+        llmService.askCharacterWithMeta("Treebeard", prompt, treebeardPersona, "{").let {
+            if (it.text.startsWith("{")) it.text else "{" + it.text
         }
-        // Fallback: local embedded engine
-        val embeddedEngine = CelebrimbotEmbeddedEngine.getInstance(project)
-        if (embeddedEngine.isModelDownloaded()) {
-            val formatted = "<|im_start|>system\n$treebeardPersona<|im_end|>\n" +
-                "<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n{"
-            return "{" + embeddedEngine.askQuestion(formatted, stopStrings = listOf("<|im_end|>", "<|im_start|>"))
-        }
-        // Last resort: return a safe "complete" verdict so the flow is never blocked
-        return """{"isComplete":true,"reasoning":"Treebeard could not be reached. The work is assumed complete.","additionalRequestsForPlanner":[]}"""
-    }
-
-    private fun callAlibabaForTreebeard(prompt: String): String {
-        val apiKey = com.github.giacomosaccaggi.celebrimbot.settings.CelebrimbotPasswordSafe
-            .getAlibabaApiKey(project) ?: return "Error: No Alibaba API key"
-        val model = "qwen-plus"
-
-        val payload = mapOf(
-            "model" to model,
-            "input" to mapOf(
-                "messages" to listOf(
-                    mapOf("role" to "system", "content" to treebeardPersona),
-                    mapOf("role" to "user", "content" to prompt)
-                )
-            )
-        )
-
-        val httpClient = java.net.http.HttpClient.newBuilder()
-            .connectTimeout(java.time.Duration.ofSeconds(10))
-            .build()
-        val request = java.net.http.HttpRequest.newBuilder()
-            .uri(java.net.URI.create("https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/text-generation/generation"))
-            .header("Content-Type", "application/json")
-            .header("Authorization", "Bearer $apiKey")
-            .timeout(java.time.Duration.ofSeconds(45))
-            .POST(java.net.http.HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
-            .build()
-
-        return try {
-            val response = httpClient.send(request, java.net.http.HttpResponse.BodyHandlers.ofString())
-            if (response.statusCode() == 200) {
-                val root = gson.fromJson(response.body(), JsonObject::class.java)
-                root.getAsJsonObject("output")
-                    ?.getAsJsonArray("choices")
-                    ?.get(0)?.asJsonObject
-                    ?.getAsJsonObject("message")
-                    ?.get("content")?.asString
-                    ?: "Error: Unexpected Alibaba response format"
-            } else {
-                "Error: HTTP ${response.statusCode()}"
-            }
-        } catch (e: Exception) {
-            "Error: ${e.message}"
-        }
-    }
 
     // ── JSON parsing ──────────────────────────────────────────────────────────
 

@@ -13,6 +13,7 @@ class CelebrimbotSettingsState : PersistentStateComponent<CelebrimbotSettingsSta
     class State {
         var validationCommand: String = ""
         var selectedLocalModel: LocalAiModel = LocalAiModel.QWEN_7B
+        var terminalTimeoutSeconds: Long = 60L
 
         // ── Per-character agent configuration ─────────────────────────────────
         // Stored as Map<characterKey, AgentConfigDto> so IntelliJ's XML

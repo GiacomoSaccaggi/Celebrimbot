@@ -71,7 +71,7 @@ class DuckDuckGoSearchOperator : WebSearchOperator {
                 if (count >= 5) return@forEach
                 val topic = el.asJsonObject
                 val text = topic.get("Text")?.asString?.takeIf { it.isNotBlank() } ?: return@forEach
-                val url = topic.getAsJsonObject("FirstURL")?.asString ?: ""
+                val url = topic.get("FirstURL")?.asString ?: ""
                 sb.appendLine("- $text${if (url.isNotBlank()) " ($url)" else ""}")
                 count++
             }

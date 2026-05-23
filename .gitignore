@@ -9,5 +9,5 @@ build
 /.idea/
 /.run/
 /develop/
-
-
+/.kiro/
+/build/eval/

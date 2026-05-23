@@ -52,8 +52,8 @@ User Message
 
 ### The Fellowship
 
-| Character | Role | Where |
-|-----------|------|-------|
+| Character | Role | Default Provider |
+|-----------|------|------------------|
 | **Gandalf** | Router: decides CHAT / EASY_TASK / COMPLEX_TASK | Local Qwen |
 | **Galadriel** | Conversational AI: answers in English with Tolkienian flair, addresses user as "Mellow" | Local Qwen |
 | **Aragorn** | Easy-task planner: breaks request into atomic steps, assigns workers | Local Qwen |
@@ -77,9 +77,11 @@ Gandalf receives the full conversation history. If the same request has been ask
 
 ### AI Provider Priority
 
+Each character's provider is configurable per-project in Settings. The table below shows the **default** priority chain.
+
 | Character | Role | 1st Choice | 2nd Choice | 3rd Choice |
-|-----------|------|-----------|-----------|-----------|
-| **Gandalf** | Router | Local Qwen | Heuristic fallback | — |
+|-----------|------|-----------|-----------|----------|
+| **Gandalf** | Router | Local Qwen | Amazon Q | — |
 | **Galadriel** | Chat | Local Qwen | Alibaba Cloud | Gemini |
 | **Aragorn** | Easy-task planner | Local Qwen | — | — |
 | **Elrond** | Complex pre-planner | Local Qwen | — | — |
@@ -90,7 +92,7 @@ Gandalf receives the full conversation history. If the same request has been ask
 | **Treebeard** | Ent Reviewer (reflection) | Alibaba Cloud | Local Qwen | Safe fallback |
 | **Bilbo** | Summarizer | Local Qwen | — | — |
 
-The local model runs entirely on your machine via [java-llama.cpp](https://github.com/kherud/java-llama.cpp) — no internet required for most operations.
+All four providers — `Local`, `Alibaba Qwen Cloud`, `Google Gemini`, `Amazon Q Developer` — are selectable per-character. Amazon Q Developer authenticates via the SSO token written by the Amazon Q JetBrains plugin (no separate API key needed). The local model runs entirely on your machine via [java-llama.cpp](https://github.com/kherud/java-llama.cpp) — no internet required for most operations.
 
 ---
 
@@ -106,7 +108,7 @@ The local model runs entirely on your machine via [java-llama.cpp](https://githu
 - **Multi-agent loop** — Gandalf routes → Aragorn/Elrond plan → Celebrimbor refines → Samwise executes → Bilbo summarizes
 - **Smart three-way routing** — CHAT / EASY_TASK / COMPLEX_TASK with history awareness (Gandalf)
 - **Offline-first** — embedded Qwen 2.5 Coder 1.5B runs locally with no API calls
-- **Multi-provider fallback** — Alibaba Cloud (Qwen Plus) → Google Gemini → local model
+- **Multi-provider fallback** — Local Qwen → Alibaba Cloud (Qwen Plus) → Google Gemini → Claude Sonnet 4.6 (via Amazon Q Developer)
 - **Secure credential storage** — API keys stored via IntelliJ PasswordSafe, never in plain text
 - **Per-project settings** — each project can use a different provider and model
 - **Standalone CLI** — `celebrimbot forge / scan / serve / mcp-stdio / undo` for use outside the IDE
@@ -150,6 +152,7 @@ The local model runs entirely on your machine via [java-llama.cpp](https://githu
 - ~1.2 GB disk space for the local model (downloaded automatically on first use)
 - Optional: Alibaba Cloud API key for cloud-powered planning
 - Optional: Google Gemini API key as secondary fallback
+- Optional: Amazon Q Developer (authenticated via the Amazon Q JetBrains plugin — no separate API key)
 
 ---
 
@@ -173,7 +176,7 @@ Open <kbd>Settings</kbd> → <kbd>Tools</kbd> → <kbd>Celebrimbot</kbd>
 
 | Field | Description |
 |-------|-------------|
-| **Provider** | `Local API`, `Google Gemini`, or `Alibaba Qwen Cloud` |
+| **Provider** | `Local API`, `Google Gemini`, `Alibaba Qwen Cloud`, or `Amazon Q Developer` |
 | **Base URL** | API endpoint (pre-filled per provider) |
 | **Model Name** | e.g. `qwen-plus`, `gemini-1.5-flash` |
 | **API Key** | For Gemini or local OpenAI-compatible APIs |
@@ -233,6 +236,7 @@ The header shows `🖥️ N  ☁️ N` — local inference count vs cloud planne
 | Model | Qwen2.5-Coder-1.5B-Instruct Q4_K_M (GGUF) |
 | Cloud AI | Alibaba Cloud Model Studio (DashScope) |
 | Cloud fallback | Google Gemini 1.5 Flash |
+| Cloud option | Amazon Q Developer (Claude Sonnet, via SSO) |
 | CLI | Clikt 4.4.0 |
 | HTTP Bridge | Ktor 2.3.11 (Netty) |
 | JSON | Gson 2.10.1 |
@@ -300,7 +304,7 @@ src/main/kotlin/.../celebrimbot/
 │       └── Tools                     # 15 tool implementations wrapping all operators
 ├── services/
 │   ├── CelebrimbotAgentOrchestrator  # Multi-agent loop: routing, planning, execution, reflection
-│   ├── CelebrimbotLlmService         # AI provider abstraction (local/Alibaba/Gemini)
+│   ├── CelebrimbotLlmService         # AI provider abstraction (local/Alibaba/Gemini/Amazon Q)
 │   ├── CelebrimbotEmbeddedEngine     # Local llama.cpp inference engine
 │   ├── CelebrimbotTerminalService    # IDE terminal command execution
 │   ├── ValidationService             # Build system detection + Council's Review command
@@ -332,6 +336,78 @@ src/main/resources/
 └── META-INF/
     └── plugin.xml
 ```
+
+---
+
+## Provider Benchmark Results
+
+The following results come from an automated LLM-as-a-Judge evaluation (`src/test/testData/eval/run_eval.py`) run across **12 provider configurations** and **8 test cases**, using **Claude Sonnet 4.6 (via Amazon Q Developer)** as the judge. Full results are in [`EVAL_REPORT.md`](EVAL_REPORT.md).
+
+### How the Eval Works
+
+The evaluation framework is a standalone Python script that runs the full Celebrimbot agent pipeline headlessly — no IDE required. Each test case defines a natural-language input, the expected routing decision (CHAT / EASY_TASK / COMPLEX_TASK), and a set of judge criteria.
+
+**Test cases** (`src/test/testData/eval/eval_suite.json`) cover:
+- Routing accuracy (does Gandalf classify greetings, single-file tasks, and multi-file tasks correctly?)
+- Planner quality (does Elrond produce a valid JSON brief with all required fields?)
+- Worker output quality (does Frodo write syntactically valid Python with the requested classes/methods?)
+- Reviewer behaviour (does Treebeard flag incomplete work when a README is too short?)
+- Summary quality (does Bilbo address the user as "Mellow" in Tolkienian style?)
+
+**How it runs:**
+1. For each configuration, the script spins up a `HeadlessPipeline` in a temporary directory
+2. The pipeline calls the configured LLM backend (Amazon Q Developer via SSO token, or Ollama for local models) for each character
+3. After execution, the judge (Claude Sonnet 4.6 via Amazon Q Developer) receives the full agent trace, internal logs, and written file contents, then scores the run 0–10 and flags specific issues
+4. Results are aggregated into `EVAL_REPORT.md` and per-configuration JSON files in `build/eval/`
+
+**To run it yourself:**
+```bash
+# Requires: Amazon Q Developer SSO login + Ollama for local models
+brew install ollama && ollama serve &
+ollama pull qwen2.5-coder:1.5b qwen2.5-coder:7b llama3.1:8b deepseek-coder:6.7b phi3.5
+python3 src/test/testData/eval/run_eval.py
+```
+
+### Final Ranking
+
+| Rank | Configuration | Avg Score | Pass Rate |
+|------|--------------|-----------|----------|
+| 🥇 | Claude Sonnet 4.6 planners + **Qwen 2.5 Coder 7B** workers | **9.0/10** | 100% |
+| 🥈 | Claude Sonnet 4.6 planners + **Phi-3.5 Mini** workers | **9.0/10** | 100% |
+| 🥉 | Claude Sonnet 4.6 planners + **Llama 3.1 8B** workers | **8.9/10** | 100% |
+| #4 | All Claude Sonnet 4.6 (baseline) | 8.6/10 | 87.5% |
+| #5 | Claude Sonnet 4.6 core only | 8.4/10 | 87.5% |
+| #6 | Claude Sonnet 4.6 planners + Qwen 2.5 Coder 1.5B workers | 7.8/10 | 87.5% |
+| #7 | All Local — Qwen 2.5 Coder 7B | 7.8/10 | 87.5% |
+| #8 | All Local — Llama 3.1 8B | 7.8/10 | 87.5% |
+| #9 | All Local — Phi-3.5 Mini | 6.2/10 | 62.5% |
+| #10 | Claude Sonnet 4.6 planners + DeepSeek Coder 6.7B workers | 6.1/10 | 75.0% |
+| #11 | All Local — Qwen 2.5 Coder 1.5B | 4.9/10 | 37.5% |
+| #12 | All Local — DeepSeek Coder 6.7B | 4.9/10 | 50.0% |
+
+### Key Findings
+
+**The optimal configuration is: Claude Sonnet 4.6 (via Amazon Q Developer) for planners + a 7B+ local model for workers.**
+
+The top three configurations all share the same pattern: Claude Sonnet 4.6 (via Amazon Q Developer) handles Gandalf (routing), Elrond (context enrichment), Celebrimbor (master planning), and Treebeard (review), while a local model runs Aragorn, Frodo, Legolas & Gimli, Galadriel, and Bilbo. This hybrid approach **outperforms using Claude Sonnet 4.6 for everything** (9.0 vs 8.6) while minimising cloud API calls.
+
+**Local 7B models are competitive workers.** Qwen 2.5 Coder 7B and Llama 3.1 8B running fully locally (no cloud) both score 7.8/10 — higher than the "Claude Sonnet 4.6 core only" configuration (8.4/10 but with more cloud calls). For teams that need full offline operation, Qwen 7B or Llama 8B are viable.
+
+**DeepSeek Coder 6.7B underperforms its size.** Despite being comparable in size to Qwen 7B, DeepSeek scores only 4.9/10 all-local and 6.1/10 as a worker. It frequently refuses tasks with "I can't assist with that" and produces malformed JSON, making it unreliable for agentic pipelines.
+
+**Qwen 2.5 Coder 1.5B is too small for reliable routing and planning.** At 4.9/10 all-local, it misroutes simple greetings as COMPLEX_TASK and produces incomplete JSON plans. It is only viable as a Frodo/worker when paired with a cloud planner.
+
+**Phi-3.5 Mini (3.8B) punches above its weight as a worker.** Paired with Claude Sonnet 4.6 planners it reaches 9.0/10 — matching Qwen 7B at a fraction of the RAM footprint (~2.5 GB vs ~4.5 GB). Best choice for resource-constrained environments.
+
+### Recommended Configurations
+
+| Use Case | Gandalf | Elrond | Celebrimbor | Workers | Score |
+|----------|---------|--------|-------------|---------|-------|
+| **Best quality** | Amazon Q | Amazon Q | Amazon Q | Qwen 7B / Phi-3.5 | 9.0/10 |
+| **Balanced** | Amazon Q | Amazon Q | Amazon Q | Llama 3.1 8B | 8.9/10 |
+| **Minimum cloud** | Amazon Q | Amazon Q | Amazon Q | Qwen 1.5B | 7.8/10 |
+| **Full offline** | Qwen 7B | Qwen 7B | Qwen 7B | Qwen 7B | 7.8/10 |
+| **Ultra-light offline** | Phi-3.5 | Phi-3.5 | Phi-3.5 | Phi-3.5 | 6.2/10 |
 
 ---
 

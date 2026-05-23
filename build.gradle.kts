@@ -77,6 +77,10 @@ dependencies {
     
     testImplementation(libs.junit)
     testImplementation(libs.opentest4j)
+    testImplementation("io.mockk:mockk:1.13.13")
+    testImplementation("io.kotest:kotest-property:5.9.1")
+    testImplementation("io.kotest:kotest-runner-junit5:5.9.1")
+    testRuntimeOnly("org.junit.vintage:junit-vintage-engine:5.10.2")
 
     // IntelliJ Platform Gradle Plugin Dependencies Extension - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-dependencies-extension.html
     intellijPlatform {
@@ -182,6 +186,10 @@ kover {
 }
 
 tasks {
+    test {
+        useJUnitPlatform()
+    }
+
     wrapper {
         gradleVersion = providers.gradleProperty("gradleVersion").get()
     }
