@@ -59,7 +59,14 @@ class WriteFileTool(private val fileOp: FileOperator) : CelebrimbotTool {
 
 // ── TERMINAL TOOLS ──────────────────────────────────────────────────
 
-class RunTerminalTool(private val termOp: TerminalOperator) : CelebrimbotTool {
+class RunTerminalTool(
+    private val termOp: TerminalOperator,
+    private val timeoutSeconds: Long = DEFAULT_TIMEOUT_SECONDS
+) : CelebrimbotTool {
+    companion object {
+        const val DEFAULT_TIMEOUT_SECONDS = 60L
+    }
+
     override val name = "run_terminal"
     override val category = ToolCategory.TERMINAL
     override val description = "Execute a shell command"
@@ -69,7 +76,7 @@ class RunTerminalTool(private val termOp: TerminalOperator) : CelebrimbotTool {
     override fun execute(args: Map<String, String>): ToolResult {
         val command = args["command"] ?: return ToolResult(false, "No command provided")
         return try {
-            val result = termOp.executeCommand(command).get(30, TimeUnit.SECONDS)
+            val result = termOp.executeCommand(command).get(timeoutSeconds, TimeUnit.SECONDS)
             ToolResult(result.exitCode == 0, result.output)
         } catch (e: Exception) {
             ToolResult(false, e.message ?: "Terminal execution failed")

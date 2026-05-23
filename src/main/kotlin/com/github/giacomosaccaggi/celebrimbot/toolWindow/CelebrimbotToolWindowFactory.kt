@@ -78,7 +78,9 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
             border = JBUI.Borders.empty(8, 8, 4, 8)
         }
 
-        private val scrollPane = JBScrollPane(messagesPanel).apply {
+        private val thinkingIndicator = ThinkingIndicator(messagesPanel)
+
+        private val scrollPane = SmartScrollPane(messagesPanel).apply {
             border = BorderFactory.createEmptyBorder()
             verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
             horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
@@ -286,7 +288,8 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
             addUserBubble(text)
             fullLog.add("You: $text")
             inputArea.text = ""
-            scrollToBottom()
+            scrollPane.scrollToBottomIfAtEnd()
+            thinkingIndicator.show()
 
             val editor = FileEditorManager.getInstance(project).selectedTextEditor
             val selectedText = editor?.selectionModel?.selectedText
@@ -302,8 +305,9 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
                 prompt, projectSkeleton, conversationHistory.toList(),
                 onProgress = { progress ->
                     ApplicationManager.getApplication().invokeLater {
+                        thinkingIndicator.hide()
                         addBotBubble(progress)
-                        scrollToBottom()
+                        scrollPane.scrollToBottomIfAtEnd()
                         val plain = progress.replace(Regex("<[^>]+>"), "").trim()
                         if (plain.isNotEmpty()) {
                             fullLog.add(plain)
@@ -313,6 +317,7 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
                 },
                 onComplete = {
                     ApplicationManager.getApplication().invokeLater {
+                        thinkingIndicator.hide()
                         val summary = finalResponses
                             .joinToString(" ")
                             .replace(Regex("<[^>]+>"), "")
@@ -429,12 +434,7 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
             return row
         }
 
-        private fun scrollToBottom() {
-            SwingUtilities.invokeLater {
-                val bar = scrollPane.verticalScrollBar
-                bar.value = bar.maximum
-            }
-        }
+
 
         private fun escapeHtml(text: String) = text
             .replace("&", "&amp;")

@@ -4,7 +4,45 @@
 
 ## [Unreleased]
 
-## [0.0.3]
+## [0.0.4]
+
+### Added
+- **Amazon Q Developer provider**: every Fellowship character can now use Claude Sonnet 4.6 (via Amazon Q Developer) as its inference backend — selectable per-character in Settings → Celebrimbot → Fellowship AI Configuration. Authentication reuses the SSO token written by the Amazon Q JetBrains plugin or VSCode extension to `~/.aws/sso/cache/` — no separate CLI or API key required
+- `settings/AmazonQSettings.kt`: persistent per-project settings for Amazon Q (SSO start URL, region, timeout, redact-secrets toggle)
+- `services/AmazonQCliProvider.kt`: SSO token discovery, authentication check, browser login via `aws sso login`, and inference via the CodeWhisperer Streaming API (`AmazonCodeWhispererStreamingService.GenerateAssistantResponse`). Handles event-stream response parsing, secret redaction, and token expiry detection
+- `CharacterProvider.AMAZON_Q` added to the enum — all existing per-character config infrastructure picks it up automatically
+- Settings UI: Amazon Q section with status label, "Check status" and "Login with browser" buttons, SSO URL/region fields, timeout slider, and redact-secrets checkbox
+- **Per-character provider display in chat**: every agent message now shows which provider responded — e.g. `[🧙 Gandalf (Amazon Q): CHAT]`, `[🧝 Galadriel (Amazon Q)]`, `[💎 Celebrimbor (Amazon Q): forging the plan...]`. Fallback errors are surfaced inline: `(Local Qwen (fallback — Amazon Q error: ...))`
+- `CelebrimbotLlmService.LlmResponse`: new wrapper `data class(text, provider)` returned by `askCharacterWithMeta()` — all orchestrator call sites updated to use it
+- `askCharacterWithMeta()` replaces the old `askCharacter()` everywhere in the orchestrator; `askCharacter()` kept as a thin delegate for backward compatibility
+- **Routing fully delegated to Gandalf's configured provider**: removed all heuristic pre-checks (`forceComplexPatterns`, `isSimilarToPrevious`, `heuristicRoute`). Gandalf now calls `askCharacterWithMeta("Gandalf", ...)` and the result drives routing — if the model returns something unrecognisable, the safe fallback is `COMPLEX_TASK`
+- **`promptFor()` helper in orchestrator**: loads `*_system_prompt_local.txt` when the character's provider is `LOCAL`, falls back to the standard prompt otherwise — enables model-specific prompt variants without changing call sites
+- **Local prompt variants** (`*_system_prompt_local.txt`) for all 9 characters: shorter, zero Tolkien metaphors, 3 examples max, direct JSON instructions — optimised for 1.5B–7B models that struggle with long prompts
+- **`executeTasks()` centralised helper**: replaces three identical inline task-execution loops (EASY_TASK, COMPLEX_TASK, Treebeard re-plan). Maintains a `readContext` map (`path → content`) so `write_code` tasks automatically receive the content of any file previously read by `read_psi` in the same session
+- **`buildExecutionSummary()` enriched**: now reads the actual content of written files (first 500 chars preview) so Treebeard can evaluate quality, not just file names
+- **Treebeard uses `askCharacterWithMeta`**: removed the hardcoded Alibaba-first logic in `TreebeardReviewService`; Treebeard now respects its configured provider like every other character
+- **LLM-as-a-Judge eval framework** (`src/test/testData/eval/`): standalone Python script that runs the full agent pipeline headlessly across 12 provider configurations (Amazon Q + 5 local models via Ollama) and scores each run 0–10 using Claude Sonnet 4.6 (via Amazon Q Developer) as judge
+  - `eval_suite.json`: 8 test cases covering routing accuracy, planner quality, worker output, Treebeard behaviour, and Bilbo summary style
+  - `run_eval.py`: `HeadlessPipeline`, `AmazonQHeadlessProvider`, `AgentJudge`, `EvalRunner` — no IDE required; outputs `EVAL_REPORT.md` and per-config JSON files in `build/eval/`
+  - `EvalCommand` added to CLI (`celebrimbot eval --suite ... --output ...`)
+
+### Changed
+- `CelebrimbotAgentOrchestrator`: all `loadPrompt()` calls replaced with `promptFor(character, filename)` — prompt selection is now provider-aware throughout the pipeline
+- `bilboSummary()` refactored: uses `askCharacterWithMeta` and shows provider in the Bilbo header
+- `writeCodeAction()`: `askWorker()` now returns `Pair<String, String>` (text, provider) and emits the provider in the worker label
+- `executeTaskWithRetry()`: Samwise label shows configured provider; escalation to Elrond uses `askCharacterWithMeta`
+- Treebeard re-plan in `treebeardAndBilbo()` uses `askCharacterWithMeta` for Celebrimbor
+
+### Fixed
+- `sharedContext` bug: previously only the last `read_psi` result was passed to the next task; now a `readContext` map ensures every `write_code` receives the content of its specific file if it was read earlier in the same session
+- `companion object` structure in `CelebrimbotAgentOrchestrator` was malformed (constants outside the object); fixed
+- `JsonObject` import missing in `TreebeardReviewService` after refactor; restored
+- Amazon Q response parsing: handles AWS event-stream binary framing (extracts `"content":"..."` chunks via regex instead of trying to parse the raw binary as JSON)
+- Amazon Q endpoint corrected: `/chat/send-message` → `/` (root) with `X-Amz-Target: AmazonCodeWhispererStreamingService.GenerateAssistantResponse` and `Content-Type: application/x-amz-json-1.0`
+- Hardcoded absolute path removed from `run_eval.py`; now uses `Path(__file__).resolve().parents[4]` (repo-relative)
+
+---
+
 
 ### Added
 - **Feature 3 — The Rings of Power (Dynamic Tool Registry)**: unified all operators into a `ToolRegistry`. Every capability is now a `CelebrimbotTool` with a self-describing JSON schema. Aragorn and Celebrimbor receive auto-generated tool lists via `{{TOOLS}}` placeholder injection — adding a new tool automatically appears in both planners' prompts with zero manual editing

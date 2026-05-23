@@ -4,6 +4,7 @@ import com.github.giacomosaccaggi.celebrimbot.settings.CelebrimbotPasswordSafe
 import com.github.giacomosaccaggi.celebrimbot.settings.CelebrimbotSettingsState
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
@@ -18,6 +19,8 @@ import java.time.Duration
 
 @Service(Service.Level.PROJECT)
 class CelebrimbotLlmService(private val project: Project) {
+
+    private val logger = Logger.getInstance(CelebrimbotLlmService::class.java)
 
     private val httpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
@@ -261,9 +264,15 @@ class CelebrimbotLlmService(private val project: Project) {
      * Falls back to the embedded engine if the configured backend is
      * unavailable (missing API key, network error, etc.).
      */
-    fun askCharacter(character: String, prompt: String, persona: String, jsonPrefix: String = ""): String {
+    data class LlmResponse(val text: String, val provider: String)
+
+    fun askCharacter(character: String, prompt: String, persona: String, jsonPrefix: String = ""): String =
+        askCharacterWithMeta(character, prompt, persona, jsonPrefix).text
+
+    fun askCharacterWithMeta(character: String, prompt: String, persona: String, jsonPrefix: String = ""): LlmResponse {
         val cfg = com.github.giacomosaccaggi.celebrimbot.settings.CelebrimbotSettingsState
             .getInstance(project).getAgentConfig(character)
+        val fallbackPrompt = "<|im_start|>system\n$persona<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n$jsonPrefix"
 
         return when (cfg.provider) {
             com.github.giacomosaccaggi.celebrimbot.settings.CharacterProvider.LOCAL -> {
@@ -272,20 +281,29 @@ class CelebrimbotLlmService(private val project: Project) {
                     val formatted = "<|im_start|>system\n$persona<|im_end|>\n" +
                         "<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n$jsonPrefix"
                     val raw = embeddedEngine.askQuestion(formatted, stopStrings = listOf("<|im_end|>", "<|im_start|>"))
-                    if (jsonPrefix.isNotEmpty()) jsonPrefix + raw else raw
+                    LlmResponse(if (jsonPrefix.isNotEmpty()) jsonPrefix + raw else raw, "Local Qwen")
                 } else {
-                    fallbackToEmbedded("<|im_start|>system\n$persona<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n$jsonPrefix")
+                    LlmResponse(fallbackToEmbedded(fallbackPrompt), "Local Qwen (fallback)")
                 }
             }
             com.github.giacomosaccaggi.celebrimbot.settings.CharacterProvider.ALIBABA_QWEN -> {
                 val result = callAlibabaResponses(prompt, persona)
-                if (!result.startsWith("Error:")) result
-                else fallbackToEmbedded("<|im_start|>system\n$persona<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n$jsonPrefix")
+                if (!result.startsWith("Error:")) LlmResponse(result, "Alibaba Qwen")
+                else LlmResponse(fallbackToEmbedded(fallbackPrompt), "Local Qwen (fallback)")
             }
             com.github.giacomosaccaggi.celebrimbot.settings.CharacterProvider.GOOGLE_GEMINI -> {
                 val result = callExternalLlm(prompt, persona, forcedGemini = true)
-                if (!result.startsWith("Error:")) result
-                else fallbackToEmbedded("<|im_start|>system\n$persona<|im_end|>\n<|im_start|>user\n$prompt<|im_end|>\n<|im_start|>assistant\n$jsonPrefix")
+                if (!result.startsWith("Error:")) LlmResponse(result, "Google Gemini")
+                else LlmResponse(fallbackToEmbedded(fallbackPrompt), "Local Qwen (fallback)")
+            }
+            com.github.giacomosaccaggi.celebrimbot.settings.CharacterProvider.AMAZON_Q -> {
+                val result = AmazonQCliProvider.getInstance(project).ask(prompt, persona)
+                if (!result.startsWith("Error:")) LlmResponse(result, "Amazon Q")
+                else {
+                    logger.warn("Amazon Q failed for $character: $result")
+                    val fallback = fallbackToEmbedded(fallbackPrompt)
+                    LlmResponse(fallback, "Local Qwen (fallback — Amazon Q error: ${result.removePrefix("Error: ").take(80)})")
+                }
             }
         }
     }
@@ -299,6 +317,24 @@ class CelebrimbotLlmService(private val project: Project) {
                 ?.readText()
                 ?.trim()
                 ?: error("Prompt file not found: $filename")
+
+        /**
+         * Loads a prompt variant for the given provider.
+         * For LOCAL, tries <name>_local.txt first, falls back to <name>.txt.
+         * For all other providers, loads <name>.txt directly.
+         */
+        fun loadPromptForProvider(
+            filename: String,
+            provider: com.github.giacomosaccaggi.celebrimbot.settings.CharacterProvider
+        ): String {
+            if (provider == com.github.giacomosaccaggi.celebrimbot.settings.CharacterProvider.LOCAL) {
+                val localFilename = filename.removeSuffix(".txt") + "_local.txt"
+                val localPrompt = CelebrimbotLlmService::class.java.getResourceAsStream("/prompts/$localFilename")
+                    ?.bufferedReader()?.readText()?.trim()
+                if (!localPrompt.isNullOrBlank()) return localPrompt
+            }
+            return loadPrompt(filename)
+        }
     }
 
     fun buildProjectSkeleton(project: Project): String {

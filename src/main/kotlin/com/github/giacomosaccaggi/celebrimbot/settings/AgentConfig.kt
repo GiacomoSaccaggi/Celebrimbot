@@ -6,7 +6,8 @@ package com.github.giacomosaccaggi.celebrimbot.settings
 enum class CharacterProvider(val displayName: String) {
     LOCAL("Local (embedded)"),
     GOOGLE_GEMINI("Google Gemini"),
-    ALIBABA_QWEN("Alibaba Qwen Cloud");
+    ALIBABA_QWEN("Alibaba Qwen Cloud"),
+    AMAZON_Q("Amazon Q Developer");
 
     override fun toString(): String = displayName
 }

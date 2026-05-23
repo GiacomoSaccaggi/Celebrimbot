@@ -9,6 +9,11 @@
     <resource-bundle>messages.MyBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
+        <projectService
+                serviceImplementation="com.github.giacomosaccaggi.celebrimbot.settings.AmazonQSettings"/>
+        <projectService
+                serviceImplementation="com.github.giacomosaccaggi.celebrimbot.services.AmazonQCliProvider"/>
+
         <projectConfigurable
                 parentId="tools"
                 instance="com.github.giacomosaccaggi.celebrimbot.settings.CelebrimbotSettingsConfigurable"

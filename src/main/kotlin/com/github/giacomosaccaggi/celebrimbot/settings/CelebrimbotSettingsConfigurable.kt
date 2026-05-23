@@ -1,5 +1,6 @@
 package com.github.giacomosaccaggi.celebrimbot.settings
 
+import com.github.giacomosaccaggi.celebrimbot.services.AmazonQCliProvider
 import com.intellij.openapi.options.BoundConfigurable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
@@ -16,8 +17,10 @@ import javax.swing.*
 class CelebrimbotSettingsConfigurable(private val project: Project) : BoundConfigurable("Celebrimbot") {
 
     private val settings = CelebrimbotSettingsState.getInstance(project)
+    private val amazonQSettings = AmazonQSettings.getInstance(project)
     private var apiKey: String = ""
     private var alibabaApiKey: String = ""
+    private lateinit var amazonQStatusLabel: JLabel
 
     private inner class CharacterRow(val key: String) {
         val providerBox = ComboBox(CharacterProvider.entries.toTypedArray()).apply {
@@ -28,8 +31,9 @@ class CelebrimbotSettingsConfigurable(private val project: Project) : BoundConfi
         init {
             providerBox.addActionListener {
                 val isLocal = providerBox.selectedItem == CharacterProvider.LOCAL
-                modelNameField.isVisible = !isLocal
-                modelNameField.isEnabled = !isLocal
+                val isAmazonQ = providerBox.selectedItem == CharacterProvider.AMAZON_Q
+                modelNameField.isVisible = !isLocal && !isAmazonQ
+                modelNameField.isEnabled = !isLocal && !isAmazonQ
             }
         }
 
@@ -38,8 +42,9 @@ class CelebrimbotSettingsConfigurable(private val project: Project) : BoundConfi
             providerBox.selectedItem  = cfg.provider
             modelNameField.text       = cfg.specificModelName ?: ""
             val isLocal = cfg.provider == CharacterProvider.LOCAL
-            modelNameField.isVisible = !isLocal
-            modelNameField.isEnabled = !isLocal
+            val isAmazonQ = cfg.provider == CharacterProvider.AMAZON_Q
+            modelNameField.isVisible = !isLocal && !isAmazonQ
+            modelNameField.isEnabled = !isLocal && !isAmazonQ
         }
 
         fun save() {
@@ -55,7 +60,7 @@ class CelebrimbotSettingsConfigurable(private val project: Project) : BoundConfi
             val current = settings.getAgentConfig(key)
             val provider = providerBox.selectedItem as? CharacterProvider ?: CharacterProvider.LOCAL
             if (provider != current.provider) return true
-            return if (provider != CharacterProvider.LOCAL)
+            return if (provider != CharacterProvider.LOCAL && provider != CharacterProvider.AMAZON_Q)
                 modelNameField.text.trim().ifBlank { null } != current.specificModelName
             else false
         }
@@ -111,6 +116,92 @@ class CelebrimbotSettingsConfigurable(private val project: Project) : BoundConfi
                 row {
                     cell(buildCharacterTable())
                         .align(Align.FILL)
+                }
+            }
+
+            group("Amazon Q Developer") {
+                row {
+                    label("Status:")
+                    amazonQStatusLabel = label("Click \"Check status\" to verify").component
+                }
+                row {
+                    button("Check status") {
+                        val ok = AmazonQCliProvider.getInstance(project).isAuthenticated()
+                        amazonQStatusLabel.text = if (ok) "✅ Authenticated (token found in ~/.aws/sso/cache)" else "⚠️ Not authenticated — login via Amazon Q plugin first"
+                    }
+                    button("Login with browser") {
+                        amazonQStatusLabel.text = "Opening browser..."
+                        AmazonQCliProvider.getInstance(project).loginWithBrowser { success ->
+                            amazonQStatusLabel.text = if (success) "✅ Authenticated" else "❌ Login failed — try logging in via the Amazon Q plugin directly"
+                        }
+                    }
+                }
+                row {
+                    comment(
+                        "If you are already logged in via the Amazon Q JetBrains plugin or VSCode extension,<br/>" +
+                        "click <b>Check status</b> — Celebrimbot will reuse the existing token automatically."
+                    )
+                }
+                row("SSO Start URL:") {
+                    textField()
+                        .bindText(
+                            { amazonQSettings.state.ssoStartUrl },
+                            { amazonQSettings.state.ssoStartUrl = it }
+                        )
+                        .align(AlignX.FILL)
+                        .comment("Leave empty to auto-detect from ~/.aws/sso/cache (any matching token will be used)")
+                }
+                row("SSO Region:") {
+                    textField()
+                        .bindText(
+                            { amazonQSettings.state.ssoRegion },
+                            { amazonQSettings.state.ssoRegion = it }
+                        )
+                        .align(AlignX.FILL)
+                        .comment("e.g. us-east-1 — leave empty to use us-east-1 as default")
+                }
+                row {
+                    button("Auto-detect from ~/.aws/config") {
+                        val detected = AmazonQCliProvider.getInstance(project).detectSsoConfigFromAwsConfig()
+                        if (detected != null) {
+                            amazonQSettings.state.ssoStartUrl = detected.first
+                            amazonQSettings.state.ssoRegion = detected.second
+                            amazonQStatusLabel.text = "✅ Detected: ${detected.first} (${detected.second})"
+                        } else {
+                            amazonQStatusLabel.text = "❌ No sso-session found in ~/.aws/config"
+                        }
+                    }
+                }
+                row("Timeout (seconds):") {
+                    val timeoutField = JTextField(4).apply {
+                        text = (amazonQSettings.state.timeoutMillis / 1000L).toString()
+                    }
+                    cell(timeoutField)
+                    comment("Seconds to wait for Amazon Q response")
+                    @Suppress("ObjectLiteralToLambda")
+                    timeoutField.document.addDocumentListener(object : javax.swing.event.DocumentListener {
+                        override fun insertUpdate(e: javax.swing.event.DocumentEvent) = sync()
+                        override fun removeUpdate(e: javax.swing.event.DocumentEvent) = sync()
+                        override fun changedUpdate(e: javax.swing.event.DocumentEvent) = sync()
+                        fun sync() {
+                            timeoutField.text.toLongOrNull()?.let {
+                                amazonQSettings.state.timeoutMillis = it * 1000L
+                            }
+                        }
+                    })
+                }
+                row {
+                    checkBox("Redact secrets before sending to Amazon Q")
+                        .bindSelected(
+                            { amazonQSettings.state.redactSecrets },
+                            { amazonQSettings.state.redactSecrets = it }
+                        )
+                }
+                row {
+                    comment(
+                        "⚠️ Amazon Q Developer is a cloud service. Prompts and code context may be sent to AWS.<br/>" +
+                        "Only use this provider for code you are allowed to share with Amazon Q Developer."
+                    )
                 }
             }
         }
