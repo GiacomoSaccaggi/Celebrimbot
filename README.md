@@ -194,28 +194,28 @@ Open the **Celebrimbot** tool window (right side panel) and start chatting.
 **Examples:**
 
 ```
-You: ciao
-Celebrimbot: [🧝 Galadriel] Ciao! Come posso aiutarti oggi?
+You: hello
+Celebrimbot: [🧝 Galadriel] Hello! How can I help you today?
 
-You: crea un file python con una funzione che calcola la levenshtein similarity
+You: create a python file with a function that computes levenshtein similarity
 [⚔️ Aragorn: preparing the task...]
 [🌿 Samwise: executing task...]
 Celebrimbot: ✅ Code written to src/levenshtein.py
 Celebrimbot: ✅ All tasks completed!
 
-You: elimina src/levenshtein.py
+You: delete src/levenshtein.py
 [⚔️ Aragorn: preparing the task...]
 [🌿 Samwise: executing task...]
 Celebrimbot: ✅ Deleted src/levenshtein.py
 Celebrimbot: ✅ All tasks completed!
 
-You: cerca online kotlin coroutines timeout example
+You: search online for kotlin coroutines timeout example
 [⚔️ Aragorn: preparing the task...]
 [🌿 Samwise: executing task...]
 Celebrimbot: Summary: ...
 Celebrimbot: ✅ All tasks completed!
 
-You: refactora il servizio per usare le nuove interfacce
+You: refactor the service to use the new interfaces
 [🧙 Elrond: preparing the brief...]
 [💎 Celebrimbor: forging the plan...]
 [🌿 Samwise: executing 3 task(s)...]
