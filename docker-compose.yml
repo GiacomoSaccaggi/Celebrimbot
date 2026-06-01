@@ -1,0 +1,59 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: celebrimbot-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    deploy:
+      resources:
+        reservations:
+          memory: 6G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  model-loader:
+    image: ollama/ollama:latest
+    container_name: celebrimbot-model-loader
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: >
+      sh -c "
+        ollama pull qwen2.5-coder:1.5b &&
+        ollama pull qwen2.5-coder:7b &&
+        echo 'Models ready'
+      "
+    environment:
+      - OLLAMA_HOST=ollama:11434
+
+  celebrimbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: celebrimbot
+    depends_on:
+      model-loader:
+        condition: service_completed_successfully
+    ports:
+      - "16180:16180"
+    environment:
+      - CELEBRIMBOT_LLM_BASE_URL=http://ollama:11434/v1
+      - CELEBRIMBOT_LLM_MODEL=qwen2.5-coder:7b
+      - CELEBRIMBOT_ROUTER_MODEL=qwen2.5-coder:1.5b
+      - CELEBRIMBOT_PORT=16180
+      # Cloud fallbacks (optional — leave empty to disable)
+      - ALIBABA_API_KEY=${ALIBABA_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    volumes:
+      - ./projects:/workspace
+    working_dir: /workspace
+
+volumes:
+  ollama_data:

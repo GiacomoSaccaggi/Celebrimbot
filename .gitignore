@@ -13,3 +13,5 @@ build
 /build/eval/
 /certs/
 /setup-github-secrets.sh
+*.pyc
+__pycache__/
