@@ -11,3 +11,5 @@ build
 /develop/
 /.kiro/
 /build/eval/
+/certs/
+/setup-github-secrets.sh

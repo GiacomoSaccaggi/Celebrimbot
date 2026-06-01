@@ -85,6 +85,78 @@ class AmazonQCliProvider(private val project: Project) {
 
     fun isInstalled(): Boolean = true // always "installed" — reads from cache, no CLI needed
 
+    // ── Kiro-specific token discovery ─────────────────────────────────────────
+
+    /**
+     * Reads the Kiro auth token directly from the two well-known files Kiro
+     * writes to ~/.aws/sso/cache/:
+     *   - kiro-auth-token.json      (IDE session)
+     *   - kiro-auth-token-cli.json  (CLI session)
+     * Both contain a valid `accessToken` field.
+     */
+    fun readKiroToken(): SsoToken? {
+        val cacheDir = File(System.getProperty("user.home"), ".aws/sso/cache")
+        val kiroFiles = listOf("kiro-auth-token.json", "kiro-auth-token-cli.json")
+        return kiroFiles
+            .mapNotNull { name ->
+                runCatching {
+                    val obj = gson.fromJson(File(cacheDir, name).readText(), JsonObject::class.java)
+                        ?: return@runCatching null
+                    val accessToken = obj.get("accessToken")?.asString ?: return@runCatching null
+                    val expiresAtStr = obj.get("expiresAt")?.asString ?: return@runCatching null
+                    val expiry = Instant.parse(expiresAtStr)
+                    if (expiry.isBefore(Instant.now().plusSeconds(60))) return@runCatching null
+                    val startUrl = obj.get("startUrl")?.asString ?: ""
+                    val scopes = obj.getAsJsonArray("scopes")
+                        ?.map { it.asString } ?: listOf("codewhisperer:conversations")
+                    SsoToken(accessToken, expiry, startUrl, scopes)
+                }.getOrNull()
+            }
+            .maxByOrNull { it.expiresAt }
+    }
+
+    fun isKiroAuthenticated(): Boolean = readKiroToken() != null
+
+    /**
+     * Launches Kiro login. Tries `kiro login` CLI first; if not found,
+     * opens the Kiro website so the user can log in and restart Kiro.
+     */
+    fun loginWithKiro(onComplete: (Boolean) -> Unit) {
+        ApplicationManager.getApplication().executeOnPooledThread {
+            if (isKiroAuthenticated()) {
+                ApplicationManager.getApplication().invokeLater { onComplete(true) }
+                return@executeOnPooledThread
+            }
+            // Try kiro CLI login
+            val success = runCatching {
+                val proc = ProcessBuilder("kiro", "login")
+                    .inheritIO()
+                    .start()
+                proc.waitFor(180, TimeUnit.SECONDS) && proc.exitValue() == 0
+            }.getOrDefault(false)
+            if (!success) {
+                // Fallback: open Kiro download page so user can install/login
+                runCatching {
+                    java.awt.Desktop.getDesktop().browse(URI.create("https://kiro.dev"))
+                }
+            }
+            ApplicationManager.getApplication().invokeLater { onComplete(success) }
+        }
+    }
+
+    fun askAsKiro(prompt: String, persona: String): String {
+        val token = readKiroToken()
+            ?: return "Error: Kiro not authenticated — open Kiro IDE and log in first."
+        val settings = AmazonQSettings.getInstance(project).state
+        val safePrompt = if (settings.redactSecrets) redactSecrets(prompt) else prompt
+        return runCatching {
+            sendCodeWhispererMessage(token.accessToken, safePrompt, persona, settings)
+        }.getOrElse { e ->
+            logger.warn("Kiro request failed: ${e.message}")
+            "Error: ${e.message}"
+        }
+    }
+
     // ── Login (only needed if token is missing/expired) ───────────────────────
 
     /**

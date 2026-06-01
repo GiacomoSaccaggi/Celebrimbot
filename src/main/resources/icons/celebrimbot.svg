@@ -1,48 +1,69 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
-  <defs>
-    <radialGradient id="deepGrad" cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
-      <stop offset="0%" style="stop-color:#0d1d2c;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#050a11;stop-opacity:1" />
-    </radialGradient>
-    <linearGradient id="textGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" style="stop-color:#fff;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#aabfdf;stop-opacity:1" />
-    </linearGradient>
-    <filter id="epicoGlow">
-      <feGaussianBlur stdDeviation="1.5" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-  </defs>
-  
-  <circle cx="100" cy="100" r="95" fill="none" stroke="#5da9e1" stroke-width="3" filter="url(#epicoGlow)" />
-  <path d="M100,10 A90,90 0 0,1 190,100 M100,190 A90,90 0 0,1 10,100" fill="none" stroke="#fff" stroke-width="1.5" stroke-dasharray="8 4"/>
+<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.1" id="CelebrimbotLogo" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" 
+	 x="0px" y="0px" viewBox="0 0 500 500" style="enable-background:new 0 0 500 500;" xml:space="preserve">
+<style type="text/css">
+	.bg-shield-outer{fill:#239454;stroke:#1A6F3E;stroke-width:6;stroke-linejoin:round;}
+	.bg-shield-inner{fill:#2DB362;}
+	.bg-shield-highlight{fill:#5CD68D;opacity:0.4;}
+	.hammer-outline{fill:#34495E;}
+	.hammer-metal{fill:#DFE6E9;}
+	.hammer-metal-dark{fill:#B2BEC3;}
+	.gear-color{fill:#2980B9;}
+	.handle-base{fill:#2980B9;stroke:#1F618D;stroke-width:4;stroke-linejoin:round;}
+	.circuit-line{fill:none;stroke:#AED6F1;stroke-width:4;stroke-linecap:round;stroke-linejoin:round;}
+	.circuit-dot{fill:#FFFFFF;}
+</style>
 
-  <g transform="translate(60, 50)" filter="url(#epicoGlow)">
-    
-    <path d="M40,50 L40,110 Q40,120 30,120 Q20,120 20,110 L20,50 Z" fill="#b0c4de" stroke="#5da9e1" stroke-width="2"/>
-    <line x1="30" y1="60" x2="30" y2="100" stroke="#fff" stroke-width="1"/>
-    <line x1="25" y1="70" x2="25" y2="90" stroke="#fff" stroke-width="0.8"/>
-    <line x1="35" y1="70" x2="35" y2="90" stroke="#fff" stroke-width="0.8"/>
-    
-    <path d="M10,20 L50,20 Q60,20 60,30 L60,50 Q60,60 50,60 L10,60 Q0,60 0,50 L0,30 Q0,20 10,20 Z" fill="#778899" stroke="#5da9e1" stroke-width="2.5"/>
-    
-    <circle cx="30" cy="40" r="12" fill="#1c4266" stroke="#fff" stroke-width="1.5"/>
-    
-    <polygon points="30,22 33,33 44,30 36,37 46,47 34,43 30,58 26,43 14,47 24,37 16,30 27,33" fill="#fff"/>
-    <polygon points="30,15 35,32 50,28 39,39 52,52 36,46 30,68 24,46 8,52 21,39 10,28 25,32" fill="none" stroke="#fff" stroke-width="1"/>
+<g id="Shield">
+	<path class="bg-shield-outer" d="M250,70 C310,70 380,90 380,120 C380,240 330,340 250,410 C170,340 120,240 120,120 C120,90 190,70 250,70 Z"/>
+	<path class="bg-shield-inner" d="M250,85 C300,85 360,102 360,128 C360,232 315,322 250,385 C185,322 140,232 140,128 C140,102 200,85 250,85 Z"/>
+	<path class="bg-shield-highlight" d="M250,85 C200,85 140,102 140,128 C140,232 185,322 250,385 Z"/>
+</g>
 
-    <circle cx="30" cy="40" r="6" fill="#fff">
-      <animate attributeName="opacity" values="1;0.2;1" dur="1.2s" repeatCount="indefinite" />
-    </circle>
-    <circle cx="30" cy="40" r="3" fill="#5da9e1">
-      <animate attributeName="opacity" values="1;0.5;1" dur="1.2s" repeatCount="indefinite" />
-    </circle>
-
-  </g>
-
-  <text x="100" y="185" text-anchor="middle" font-family="Papyrus, Cursive" font-size="14" fill="url(#textGrad)" font-weight="bold" filter="url(#epicoGlow)">CELEBRIMBOT</text>
-  
+<g id="Hammer" transform="translate(250, 240) rotate(-45)">
+	<g id="Handle">
+		<path class="hammer-outline" d="M-25,20 L25,20 L15,190 L-15,190 Z"/>
+		<path class="handle-base" d="M-20,23 L20,23 L11,185 L-11,185 Z"/>
+		<path class="circuit-line" d="M-10,40 L-10,120 L-5,130 L-5,160"/>
+		<circle class="circuit-dot" cx="-5" cy="160" r="4"/>
+		<path class="circuit-line" d="M10,50 L10,90 L0,110 L0,150"/>
+		<circle class="circuit-dot" cx="0" cy="150" r="4"/>
+		<path class="circuit-line" d="M-2,35 L-2,80 L5,90 L5,120"/>
+		<circle class="circuit-dot" cx="5" cy="120" r="4"/>
+	</g>
+	<g id="Head">
+		<rect x="-75" y="-75" width="150" height="95" rx="15" class="hammer-outline"/>
+		<rect x="-70" y="-70" width="140" height="85" rx="10" class="hammer-metal"/>
+		<path d="M-70,5 L70,5 L60,15 L-60,15 Z" class="hammer-metal-dark"/>
+		<rect x="-70" y="-70" width="30" height="85" class="hammer-metal-dark" opacity="0.3"/>
+		<rect x="-50" y="-85" width="100" height="10" rx="3" class="hammer-outline"/>
+		<rect x="-46" y="-82" width="92" height="6" rx="2" class="hammer-metal-dark"/>
+		<g transform="translate(-30, -30)">
+			<circle cx="0" cy="0" r="22" class="hammer-outline"/>
+			<path d="M-6,-28 L6,-28 L4,-20 L-4,-20 Z" class="gear-color" transform="rotate(0)"/>
+			<path d="M-6,-28 L6,-28 L4,-20 L-4,-20 Z" class="gear-color" transform="rotate(45)"/>
+			<path d="M-6,-28 L6,-28 L4,-20 L-4,-20 Z" class="gear-color" transform="rotate(90)"/>
+			<path d="M-6,-28 L6,-28 L4,-20 L-4,-20 Z" class="gear-color" transform="rotate(135)"/>
+			<path d="M-6,-28 L6,-28 L4,-20 L-4,-20 Z" class="gear-color" transform="rotate(180)"/>
+			<path d="M-6,-28 L6,-28 L4,-20 L-4,-20 Z" class="gear-color" transform="rotate(225)"/>
+			<path d="M-6,-28 L6,-28 L4,-20 L-4,-20 Z" class="gear-color" transform="rotate(270)"/>
+			<path d="M-6,-28 L6,-28 L4,-20 L-4,-20 Z" class="gear-color" transform="rotate(315)"/>
+			<circle cx="0" cy="0" r="18" class="gear-color"/>
+			<circle cx="0" cy="0" r="7" class="hammer-metal"/>
+		</g>
+		<g transform="translate(25, -20)">
+			<circle cx="0" cy="0" r="22" class="hammer-outline"/>
+			<path d="M-6,-28 L6,-28 L4,-20 L-4,-20 Z" class="gear-color" transform="rotate(22.5)"/>
+			<path d="M-6,-28 L6,-28 L4,-20 L-4,-20 Z" class="gear-color" transform="rotate(67.5)"/>
+			<path d="M-6,-28 L6,-28 L4,-20 L-4,-20 Z" class="gear-color" transform="rotate(112.5)"/>
+			<path d="M-6,-28 L6,-28 L4,-20 L-4,-20 Z" class="gear-color" transform="rotate(157.5)"/>
+			<path d="M-6,-28 L6,-28 L4,-20 L-4,-20 Z" class="gear-color" transform="rotate(202.5)"/>
+			<path d="M-6,-28 L6,-28 L4,-20 L-4,-20 Z" class="gear-color" transform="rotate(247.5)"/>
+			<path d="M-6,-28 L6,-28 L4,-20 L-4,-20 Z" class="gear-color" transform="rotate(292.5)"/>
+			<path d="M-6,-28 L6,-28 L4,-20 L-4,-20 Z" class="gear-color" transform="rotate(337.5)"/>
+			<circle cx="0" cy="0" r="18" class="gear-color"/>
+			<circle cx="0" cy="0" r="7" class="hammer-metal"/>
+		</g>
+	</g>
+</g>
 </svg>
