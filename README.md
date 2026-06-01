@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="celebrimbot.png" alt="Celebrimbot" width="480"/>
+  <img src="logo_celebrimbot.png" alt="Celebrimbot" width="720"/>
 </p>
 
 <p align="center">
@@ -190,6 +190,10 @@ The local embedded model (`qwen2.5-coder-1.5b-instruct-q4_k_m.gguf`) is download
 ## Usage
 
 Open the **Celebrimbot** tool window (right side panel) and start chatting.
+
+<p align="center">
+  <img src="celebrimbot.png" alt="Celebrimbot chat panel" width="420"/>
+</p>
 
 **Examples:**
 

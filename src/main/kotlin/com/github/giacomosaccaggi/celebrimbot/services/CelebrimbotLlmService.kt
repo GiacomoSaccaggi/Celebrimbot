@@ -305,6 +305,14 @@ class CelebrimbotLlmService(private val project: Project) {
                     LlmResponse(fallback, "Local Qwen (fallback — Amazon Q error: ${result.removePrefix("Error: ").take(80)})")
                 }
             }
+            com.github.giacomosaccaggi.celebrimbot.settings.CharacterProvider.KIRO -> {
+                val result = AmazonQCliProvider.getInstance(project).askAsKiro(prompt, persona)
+                if (!result.startsWith("Error:")) LlmResponse(result, "Kiro")
+                else {
+                    logger.warn("Kiro failed for $character: $result")
+                    LlmResponse(fallbackToEmbedded(fallbackPrompt), "Local Qwen (fallback — Kiro error: ${result.removePrefix("Error: ").take(80)})")
+                }
+            }
         }
     }
 

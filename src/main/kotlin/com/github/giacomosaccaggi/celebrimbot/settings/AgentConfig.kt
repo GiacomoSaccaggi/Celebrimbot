@@ -7,7 +7,8 @@ enum class CharacterProvider(val displayName: String) {
     LOCAL("Local (embedded)"),
     GOOGLE_GEMINI("Google Gemini"),
     ALIBABA_QWEN("Alibaba Qwen Cloud"),
-    AMAZON_Q("Amazon Q Developer");
+    AMAZON_Q("Amazon Q Developer"),
+    KIRO("Kiro (AWS)");
 
     override fun toString(): String = displayName
 }

@@ -21,6 +21,7 @@ class CelebrimbotSettingsConfigurable(private val project: Project) : BoundConfi
     private var apiKey: String = ""
     private var alibabaApiKey: String = ""
     private lateinit var amazonQStatusLabel: JLabel
+    private lateinit var kiroStatusLabel: JLabel
 
     private inner class CharacterRow(val key: String) {
         val providerBox = ComboBox(CharacterProvider.entries.toTypedArray()).apply {
@@ -31,9 +32,10 @@ class CelebrimbotSettingsConfigurable(private val project: Project) : BoundConfi
         init {
             providerBox.addActionListener {
                 val isLocal = providerBox.selectedItem == CharacterProvider.LOCAL
-                val isAmazonQ = providerBox.selectedItem == CharacterProvider.AMAZON_Q
-                modelNameField.isVisible = !isLocal && !isAmazonQ
-                modelNameField.isEnabled = !isLocal && !isAmazonQ
+                val isNoModel = providerBox.selectedItem == CharacterProvider.AMAZON_Q
+                    || providerBox.selectedItem == CharacterProvider.KIRO
+                modelNameField.isVisible = !isLocal && !isNoModel
+                modelNameField.isEnabled = !isLocal && !isNoModel
             }
         }
 
@@ -42,16 +44,19 @@ class CelebrimbotSettingsConfigurable(private val project: Project) : BoundConfi
             providerBox.selectedItem  = cfg.provider
             modelNameField.text       = cfg.specificModelName ?: ""
             val isLocal = cfg.provider == CharacterProvider.LOCAL
-            val isAmazonQ = cfg.provider == CharacterProvider.AMAZON_Q
-            modelNameField.isVisible = !isLocal && !isAmazonQ
-            modelNameField.isEnabled = !isLocal && !isAmazonQ
+            val isNoModel = cfg.provider == CharacterProvider.AMAZON_Q
+                || cfg.provider == CharacterProvider.KIRO
+            modelNameField.isVisible = !isLocal && !isNoModel
+            modelNameField.isEnabled = !isLocal && !isNoModel
         }
 
         fun save() {
             val provider = providerBox.selectedItem as? CharacterProvider ?: CharacterProvider.LOCAL
             settings.setAgentConfig(key, AgentConfig(
                 provider          = provider,
-                specificModelName = if (provider == CharacterProvider.LOCAL) null
+                specificModelName = if (provider == CharacterProvider.LOCAL
+                    || provider == CharacterProvider.AMAZON_Q
+                    || provider == CharacterProvider.KIRO) null
                                     else modelNameField.text.trim().ifBlank { null }
             ))
         }
@@ -60,7 +65,10 @@ class CelebrimbotSettingsConfigurable(private val project: Project) : BoundConfi
             val current = settings.getAgentConfig(key)
             val provider = providerBox.selectedItem as? CharacterProvider ?: CharacterProvider.LOCAL
             if (provider != current.provider) return true
-            return if (provider != CharacterProvider.LOCAL && provider != CharacterProvider.AMAZON_Q)
+            val noModel = provider == CharacterProvider.LOCAL
+                || provider == CharacterProvider.AMAZON_Q
+                || provider == CharacterProvider.KIRO
+            return if (!noModel)
                 modelNameField.text.trim().ifBlank { null } != current.specificModelName
             else false
         }
@@ -201,6 +209,38 @@ class CelebrimbotSettingsConfigurable(private val project: Project) : BoundConfi
                     comment(
                         "⚠️ Amazon Q Developer is a cloud service. Prompts and code context may be sent to AWS.<br/>" +
                         "Only use this provider for code you are allowed to share with Amazon Q Developer."
+                    )
+                }
+            }
+
+            group("Kiro (AWS)") {
+                row {
+                    label("Status:")
+                    kiroStatusLabel = label("Click \"Check status\" to verify").component
+                }
+                row {
+                    button("Check status") {
+                        val ok = AmazonQCliProvider.getInstance(project).isKiroAuthenticated()
+                        kiroStatusLabel.text = if (ok) "✅ Authenticated (token found in ~/.aws/sso/cache/kiro-auth-token*.json)" else "⚠️ Not authenticated — open Kiro IDE and log in first"
+                    }
+                    button("Login with Kiro") {
+                        kiroStatusLabel.text = "Opening Kiro login..."
+                        AmazonQCliProvider.getInstance(project).loginWithKiro { success ->
+                            kiroStatusLabel.text = if (success) "✅ Authenticated" else "❌ Login failed — open Kiro IDE and log in manually"
+                        }
+                    }
+                }
+                row {
+                    comment(
+                        "Kiro writes its auth token to <code>~/.aws/sso/cache/kiro-auth-token.json</code>.<br/>" +
+                        "If you are already logged in to Kiro IDE, click <b>Check status</b> — no extra login needed.<br/>" +
+                        "Kiro uses the same CodeWhisperer API as Amazon Q Developer."
+                    )
+                }
+                row {
+                    comment(
+                        "⚠️ Kiro is a cloud service. Prompts and code context may be sent to AWS.<br/>" +
+                        "Only use this provider for code you are allowed to share with AWS."
                     )
                 }
             }

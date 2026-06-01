@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+## [0.0.5]
+
+### Added
+- **Kiro (AWS) provider**: every Fellowship character can now use Kiro as its inference backend — selectable per-character in Settings → Celebrimbot → Fellowship AI Configuration. Authentication reads the token Kiro writes to `~/.aws/sso/cache/kiro-auth-token.json` automatically — no separate login needed if Kiro IDE is already open and authenticated
+- `CharacterProvider.KIRO` added to the enum alongside `AMAZON_Q`, `ALIBABA_QWEN`, `GOOGLE_GEMINI`, `LOCAL`
+- `AmazonQCliProvider.readKiroToken()`: reads `kiro-auth-token.json` and `kiro-auth-token-cli.json` from `~/.aws/sso/cache/`, picks the token with the latest expiry
+- `AmazonQCliProvider.isKiroAuthenticated()`, `loginWithKiro()`, `askAsKiro()`: dedicated Kiro auth and inference methods reusing the existing CodeWhisperer streaming API
+- Settings UI: "Kiro (AWS)" section with status label, "Check status" and "Login with Kiro" buttons, and privacy notice
+
 ## [0.0.4]
 
 ### Added
