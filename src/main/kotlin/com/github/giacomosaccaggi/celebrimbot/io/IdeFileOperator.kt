@@ -65,8 +65,8 @@ class IdeFileOperator(private val project: Project) : FileOperator {
     }
 
     override fun resolvePath(fileName: String): String? {
-        val files = FilenameIndex.getFilesByName(project, fileName, GlobalSearchScope.projectScope(project))
-        return files.firstOrNull()?.virtualFile?.path?.let { 
+        val files = FilenameIndex.getVirtualFilesByName(fileName, GlobalSearchScope.projectScope(project))
+        return files.firstOrNull()?.path?.let {
             val base = getProjectBasePath()
             if (base != null && it.startsWith(base)) {
                 it.removePrefix(base).removePrefix("/")

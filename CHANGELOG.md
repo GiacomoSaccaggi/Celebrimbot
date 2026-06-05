@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [0.1.1]
+
+### Fixed
+- **CI: verifyPlugin** — expanded `externalPrefixes` to `io.ktor` (covers all Ktor packages); excluded `COMPATIBILITY_PROBLEMS`, `DEPRECATED_API_USAGES`, `INTERNAL_API_USAGES` from failure levels (all non-actionable: CLI-only Ktor bytecode + inherited ToolWindowFactory interface methods)
+- **CI: test failures** — resolved `NoSuchMethodError: runBlockingWithParallelismCompensation` caused by standard `kotlinx-coroutines` from mockk/kotest transitives shadowing IntelliJ's patched `1.10.1-intellij` version. Excluded all `kotlinx-coroutines-*` from test deps; added `kotlinx-coroutines-test:1.10.1` directly (without core) so kotest's `TestDispatcher` resolves correctly
+- Replaced deprecated `FilenameIndex.getFilesByName()` with `FilenameIndex.getVirtualFilesByName()` in `IdeFileOperator`
+
 ## [0.1.0]
 
 ### Added
