@@ -155,7 +155,7 @@ class CelebrimbotLlmService(private val project: Project) {
 
     private fun callAlibabaResponses(prompt: String, persona: String, tools: List<String> = emptyList()): String {
         val apiKey = CelebrimbotPasswordSafe.getAlibabaApiKey(project) ?: return "Error: No Alibaba API key"
-        val model = "qwen-plus"
+        val model = CelebrimbotSettingsState.getInstance(project).state.alibabaModelName.ifBlank { "qwen-plus" }
 
         val payload = mutableMapOf(
             "model" to model,
@@ -199,9 +199,9 @@ class CelebrimbotLlmService(private val project: Project) {
 
     private fun callExternalLlm(prompt: String, persona: String, forcedGemini: Boolean = false): String {
         val apiKey = CelebrimbotPasswordSafe.getApiKey(project) ?: ""
-        val baseUrl = if (forcedGemini) "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+        val modelName = CelebrimbotSettingsState.getInstance(project).state.geminiModelName.ifBlank { "gemini-1.5-flash" }
+        val baseUrl = if (forcedGemini) "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent"
                       else return "Error: No external URL configured"
-        val modelName = "gemini-1.5-flash"
 
         val requestBuilder = HttpRequest.newBuilder()
             .uri(URI.create(baseUrl))
@@ -311,6 +311,25 @@ class CelebrimbotLlmService(private val project: Project) {
                 else {
                     logger.warn("Kiro failed for $character: $result")
                     LlmResponse(fallbackToEmbedded(fallbackPrompt), "Local Qwen (fallback — Kiro error: ${result.removePrefix("Error: ").take(80)})")
+                }
+            }
+            com.github.giacomosaccaggi.celebrimbot.settings.CharacterProvider.CLI -> {
+                // Run the CLI command synchronously and extract the response
+                val cliCmd = com.github.giacomosaccaggi.celebrimbot.settings.CelebrimbotSettingsState
+                    .getInstance(project).state.cliCommand.trim()
+                if (cliCmd.isEmpty()) {
+                    LlmResponse("Error: No CLI command configured in settings", "CLI (not configured)")
+                } else {
+                    // Prepend persona as system context so CLI acts as the character
+                    val fullPrompt = if (persona.isNotEmpty()) "[System: $persona]\n\n$prompt" else prompt
+                    val escaped = "'" + fullPrompt.replace("'", "'\\''") + "'"
+                    val fullCmd = if (cliCmd.contains("{{MESSAGE}}")) {
+                        cliCmd.replace("{{MESSAGE}}", escaped)
+                    } else {
+                        "$cliCmd $escaped"
+                    }
+                    val result = CelebrimbotTerminalService.getInstance(project).runCliAndWait(fullCmd)
+                    LlmResponse(result.ifEmpty { "No response from CLI" }, "CLI")
                 }
             }
         }

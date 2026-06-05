@@ -230,10 +230,23 @@ class CelebrimbotToolWindowFactory : ToolWindowFactory, DumbAware {
                     statsLabel.text = "🖥️ 0  ☁️ 0"
                 }
             }
+            val settingsButton = JButton("⚙ Settings").apply {
+                isContentAreaFilled = false
+                isBorderPainted = false
+                font = UIUtil.getLabelFont().deriveFont(Font.BOLD, 13f)
+                foreground = accentColor
+                cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                toolTipText = "Open Celebrimbot Settings"
+                addActionListener {
+                    com.intellij.openapi.options.ShowSettingsUtil.getInstance()
+                        .showSettingsDialog(project, "Celebrimbot")
+                }
+            }
             val headerButtons = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
                 isOpaque = false
                 add(copyButton)
                 add(clearButton)
+                add(settingsButton)
             }
             header.add(headerButtons, BorderLayout.EAST)
             root.add(header, BorderLayout.NORTH)

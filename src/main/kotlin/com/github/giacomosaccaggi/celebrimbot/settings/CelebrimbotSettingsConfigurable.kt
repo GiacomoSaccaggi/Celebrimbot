@@ -1,16 +1,15 @@
 package com.github.giacomosaccaggi.celebrimbot.settings
 
 import com.github.giacomosaccaggi.celebrimbot.services.AmazonQCliProvider
+import com.github.giacomosaccaggi.celebrimbot.services.CelebrimbotLlmService
 import com.intellij.openapi.options.BoundConfigurable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.DialogPanel
 import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.dsl.builder.*
 import java.awt.Component
-import java.awt.GridBagConstraints
-import java.awt.GridBagLayout
-import java.awt.Insets
 import javax.swing.*
 
 @Suppress("DialogTitleCapitalization")
@@ -27,50 +26,44 @@ class CelebrimbotSettingsConfigurable(private val project: Project) : BoundConfi
         val providerBox = ComboBox(CharacterProvider.entries.toTypedArray()).apply {
             renderer = enumRenderer<CharacterProvider> { it.displayName }
         }
-        val modelNameField = JTextField(16)
-
-        init {
-            providerBox.addActionListener {
-                val isLocal = providerBox.selectedItem == CharacterProvider.LOCAL
-                val isNoModel = providerBox.selectedItem == CharacterProvider.AMAZON_Q
-                    || providerBox.selectedItem == CharacterProvider.KIRO
-                modelNameField.isVisible = !isLocal && !isNoModel
-                modelNameField.isEnabled = !isLocal && !isNoModel
-            }
+        val promptEditor = JBTextArea(6, 60).apply {
+            lineWrap = true
+            wrapStyleWord = true
         }
+        val promptFilename = PROMPT_FILES[key] ?: ""
 
         fun load() {
             val cfg = settings.getAgentConfig(key)
-            providerBox.selectedItem  = cfg.provider
-            modelNameField.text       = cfg.specificModelName ?: ""
-            val isLocal = cfg.provider == CharacterProvider.LOCAL
-            val isNoModel = cfg.provider == CharacterProvider.AMAZON_Q
-                || cfg.provider == CharacterProvider.KIRO
-            modelNameField.isVisible = !isLocal && !isNoModel
-            modelNameField.isEnabled = !isLocal && !isNoModel
+            providerBox.selectedItem = cfg.provider
+            val custom = settings.state.customPrompts[key]
+            promptEditor.text = custom
+                ?: if (promptFilename.isNotEmpty()) CelebrimbotLlmService.loadPrompt(promptFilename) else ""
         }
 
         fun save() {
             val provider = providerBox.selectedItem as? CharacterProvider ?: CharacterProvider.LOCAL
-            settings.setAgentConfig(key, AgentConfig(
-                provider          = provider,
-                specificModelName = if (provider == CharacterProvider.LOCAL
-                    || provider == CharacterProvider.AMAZON_Q
-                    || provider == CharacterProvider.KIRO) null
-                                    else modelNameField.text.trim().ifBlank { null }
-            ))
+            settings.setAgentConfig(key, AgentConfig(provider = provider, specificModelName = null))
+            if (promptFilename.isNotEmpty()) {
+                val defaultPrompt = CelebrimbotLlmService.loadPrompt(promptFilename)
+                val text = promptEditor.text.trim()
+                if (text.isNotEmpty() && text != defaultPrompt.trim()) {
+                    settings.state.customPrompts[key] = text
+                } else {
+                    settings.state.customPrompts.remove(key)
+                }
+            }
         }
 
         fun isModified(): Boolean {
             val current = settings.getAgentConfig(key)
             val provider = providerBox.selectedItem as? CharacterProvider ?: CharacterProvider.LOCAL
             if (provider != current.provider) return true
-            val noModel = provider == CharacterProvider.LOCAL
-                || provider == CharacterProvider.AMAZON_Q
-                || provider == CharacterProvider.KIRO
-            return if (!noModel)
-                modelNameField.text.trim().ifBlank { null } != current.specificModelName
-            else false
+            if (promptFilename.isNotEmpty()) {
+                val currentPrompt = settings.state.customPrompts[key]
+                    ?: CelebrimbotLlmService.loadPrompt(promptFilename)
+                if (promptEditor.text.trim() != currentPrompt.trim()) return true
+            }
+            return false
         }
     }
 
@@ -83,20 +76,68 @@ class CelebrimbotSettingsConfigurable(private val project: Project) : BoundConfi
     override fun createPanel(): DialogPanel {
         return panel {
 
-            group("API Keys") {
-                row("Gemini API Key:") {
-                    passwordField()
-                        .bindText({ apiKey }, { apiKey = it })
-                        .align(AlignX.FILL)
+            // ═══════════════════════════════════════════════════════════════════
+            // 1. TASK MODES
+            // ═══════════════════════════════════════════════════════════════════
+            group("Task Modes") {
+                row {
+                    checkBox("Enable EASY_TASK (Aragorn quick path)")
+                        .bindSelected(
+                            { settings.state.easyTaskEnabled },
+                            { settings.state.easyTaskEnabled = it }
+                        )
                 }
-                row("Alibaba Cloud API Key:") {
-                    passwordField()
-                        .bindText({ alibabaApiKey }, { alibabaApiKey = it })
-                        .align(AlignX.FILL)
-                        .comment("Used for Qwen Cloud (Responses API)")
+                row {
+                    checkBox("Enable COMPLEX_TASK (Elrond + Celebrimbor planning)")
+                        .bindSelected(
+                            { settings.state.complexTaskEnabled },
+                            { settings.state.complexTaskEnabled = it }
+                        )
+                }
+                row {
+                    comment(
+                        "When both are disabled, Gandalf is bypassed and all messages go directly to Galadriel (chat only).<br/><br/>" +
+                        "<b>Architecture — Six-Layer Fellowship Pipeline:</b><br/>" +
+                        "<pre>" +
+                        "User Message\n" +
+                        "     │\n" +
+                        "  ┌──▼──────────────────────────────────────────────────────┐\n" +
+                        "  │  Gandalf (Router)                                       │\n" +
+                        "  │  Classifies the request using conversation history      │\n" +
+                        "  └──┬────────────────┬────────────────────┬────────────────┘\n" +
+                        "     │                │                    │\n" +
+                        "   CHAT          EASY_TASK            COMPLEX_TASK\n" +
+                        "     │                │                    │\n" +
+                        "     ▼                ▼                    ▼\n" +
+                        "  Galadriel       Aragorn              Elrond\n" +
+                        "  (direct         (single-pass         (enriches context,\n" +
+                        "   chat reply)     multi-task plan)     semantic search)\n" +
+                        "                      │                    │\n" +
+                        "                      ▼                    ▼\n" +
+                        "                 Samwise/Frodo/       Celebrimbor (Cloud)\n" +
+                        "                 Legolas &amp; Gimli      (master planner,\n" +
+                        "                 (execute tasks,       forges detailed plan)\n" +
+                        "                  write code)              │\n" +
+                        "                      │                    ▼\n" +
+                        "                      ▼               Samwise/Frodo/\n" +
+                        "                 Treebeard             Legolas &amp; Gimli\n" +
+                        "                 (reviews work,        (execute tasks)\n" +
+                        "                  reflection loop)         │\n" +
+                        "                      │                    ▼\n" +
+                        "                      ▼               Treebeard\n" +
+                        "                   Bilbo              (reviews, reflection)\n" +
+                        "                 (session summary)         │\n" +
+                        "                                           ▼\n" +
+                        "                                        Bilbo\n" +
+                        "                                      (session summary)\n" +
+                        "</pre>"
+                    )
                 }
             }
 
+            // ═══════════════════════════════════════════════════════════════════
+            // 2. COUNCIL'S REVIEW (VALIDATION)
+            // ═══════════════════════════════════════════════════════════════════
             group("Council's Review (Validation)") {
                 row("Validation Command:") {
                     textField()
@@ -112,6 +153,42 @@ class CelebrimbotSettingsConfigurable(private val project: Project) : BoundConfi
                 }
             }
 
+            // ═══════════════════════════════════════════════════════════════════
+            // 3. FELLOWSHIP AI CONFIGURATION (per-character: provider + prompt)
+            // ═══════════════════════════════════════════════════════════════════
+            group("Fellowship AI Configuration") {
+                row {
+                    comment(
+                        "Configure each character's AI provider and system prompt.<br/>" +
+                        "Choose <b>External CLI</b> to delegate that character's work to the configured CLI command."
+                    )
+                }
+
+                for (charRow in characterRows) {
+                    val desc = CHARACTER_DESCRIPTIONS[charRow.key] ?: ""
+                    collapsibleGroup("${AgentConfig.labelFor(charRow.key)} — $desc") {
+                        row("Provider:") {
+                            cell(charRow.providerBox).align(AlignX.FILL)
+                        }
+                        if (charRow.promptFilename.isNotEmpty()) {
+                            row("System Prompt:") {
+                                cell(JBScrollPane(charRow.promptEditor).apply {
+                                    preferredSize = java.awt.Dimension(560, 150)
+                                }).align(Align.FILL)
+                            }
+                            row {
+                                button("Reset to Default") {
+                                    charRow.promptEditor.text = CelebrimbotLlmService.loadPrompt(charRow.promptFilename)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ═══════════════════════════════════════════════════════════════════
+            // 4. LOCAL MODEL
+            // ═══════════════════════════════════════════════════════════════════
             group("Local Model") {
                 row("GGUF Model:") {
                     cell(localModelComboBox)
@@ -120,14 +197,83 @@ class CelebrimbotSettingsConfigurable(private val project: Project) : BoundConfi
                 }
             }
 
-            group("Fellowship AI Configuration") {
+            // ═══════════════════════════════════════════════════════════════════
+            // 5. EXTERNAL CLI
+            // ═══════════════════════════════════════════════════════════════════
+            group("External CLI") {
+                row("CLI Command:") {
+                    textField()
+                        .bindText(
+                            { settings.state.cliCommand },
+                            { settings.state.cliCommand = it }
+                        )
+                        .align(AlignX.FILL)
+                        .comment(
+                            "Command used when a character's provider is set to <b>External CLI</b>.<br/>" +
+                            "Use <code>{{MESSAGE}}</code> as placeholder for the user message.<br/>" +
+                            "If omitted, the message is appended as an argument.<br/>" +
+                            "Examples:<br/>" +
+                            "&nbsp;&nbsp;<code>kiro-cli chat --resume --trust-all-tools</code><br/>" +
+                            "&nbsp;&nbsp;<code>junie</code><br/>" +
+                            "&nbsp;&nbsp;<code>aider --message {{MESSAGE}}</code>"
+                        )
+                }
                 row {
-                    cell(buildCharacterTable())
-                        .align(Align.FILL)
+                    comment(
+                        "⚠️ The CLI runs as a subprocess. Its stdout is streamed back into the chat panel.<br/>" +
+                        "For interactive CLIs that require trust prompts, use the IDE terminal directly."
+                    )
                 }
             }
 
-            group("Amazon Q Developer") {
+            // ═══════════════════════════════════════════════════════════════════
+            // 6. CONFIGURE YOUR APIs
+            // ═══════════════════════════════════════════════════════════════════
+            group("Configure Your APIs") {
+                row {
+                    comment("API keys, model names, and authentication for cloud providers.")
+                }
+
+                // ── Gemini ────────────────────────────────────────────────────
+                separator()
+                row { label("Google Gemini") }
+                row("API Key:") {
+                    passwordField()
+                        .bindText({ apiKey }, { apiKey = it })
+                        .align(AlignX.FILL)
+                }
+                row("Model Name:") {
+                    textField()
+                        .bindText(
+                            { settings.state.geminiModelName },
+                            { settings.state.geminiModelName = it }
+                        )
+                        .align(AlignX.FILL)
+                        .comment("e.g. gemini-1.5-flash, gemini-2.0-flash")
+                }
+
+                // ── Alibaba ───────────────────────────────────────────────────
+                separator()
+                row { label("Alibaba Qwen Cloud") }
+                row("API Key:") {
+                    passwordField()
+                        .bindText({ alibabaApiKey }, { alibabaApiKey = it })
+                        .align(AlignX.FILL)
+                        .comment("DashScope Responses API")
+                }
+                row("Model Name:") {
+                    textField()
+                        .bindText(
+                            { settings.state.alibabaModelName },
+                            { settings.state.alibabaModelName = it }
+                        )
+                        .align(AlignX.FILL)
+                        .comment("e.g. qwen-plus, qwen-max, qwen-turbo")
+                }
+
+                // ── Amazon Q Developer ────────────────────────────────────────
+                separator()
+                row { label("Amazon Q Developer") }
                 row {
                     label("Status:")
                     amazonQStatusLabel = label("Click \"Check status\" to verify").component
@@ -135,20 +281,14 @@ class CelebrimbotSettingsConfigurable(private val project: Project) : BoundConfi
                 row {
                     button("Check status") {
                         val ok = AmazonQCliProvider.getInstance(project).isAuthenticated()
-                        amazonQStatusLabel.text = if (ok) "✅ Authenticated (token found in ~/.aws/sso/cache)" else "⚠️ Not authenticated — login via Amazon Q plugin first"
+                        amazonQStatusLabel.text = if (ok) "✅ Authenticated" else "⚠️ Not authenticated"
                     }
                     button("Login with browser") {
                         amazonQStatusLabel.text = "Opening browser..."
                         AmazonQCliProvider.getInstance(project).loginWithBrowser { success ->
-                            amazonQStatusLabel.text = if (success) "✅ Authenticated" else "❌ Login failed — try logging in via the Amazon Q plugin directly"
+                            amazonQStatusLabel.text = if (success) "✅ Authenticated" else "❌ Login failed"
                         }
                     }
-                }
-                row {
-                    comment(
-                        "If you are already logged in via the Amazon Q JetBrains plugin or VSCode extension,<br/>" +
-                        "click <b>Check status</b> — Celebrimbot will reuse the existing token automatically."
-                    )
                 }
                 row("SSO Start URL:") {
                     textField()
@@ -157,7 +297,7 @@ class CelebrimbotSettingsConfigurable(private val project: Project) : BoundConfi
                             { amazonQSettings.state.ssoStartUrl = it }
                         )
                         .align(AlignX.FILL)
-                        .comment("Leave empty to auto-detect from ~/.aws/sso/cache (any matching token will be used)")
+                        .comment("Leave empty to auto-detect from ~/.aws/sso/cache")
                 }
                 row("SSO Region:") {
                     textField()
@@ -166,7 +306,6 @@ class CelebrimbotSettingsConfigurable(private val project: Project) : BoundConfi
                             { amazonQSettings.state.ssoRegion = it }
                         )
                         .align(AlignX.FILL)
-                        .comment("e.g. us-east-1 — leave empty to use us-east-1 as default")
                 }
                 row {
                     button("Auto-detect from ~/.aws/config") {
@@ -206,14 +345,12 @@ class CelebrimbotSettingsConfigurable(private val project: Project) : BoundConfi
                         )
                 }
                 row {
-                    comment(
-                        "⚠️ Amazon Q Developer is a cloud service. Prompts and code context may be sent to AWS.<br/>" +
-                        "Only use this provider for code you are allowed to share with Amazon Q Developer."
-                    )
+                    comment("⚠️ Cloud service. Prompts and code context may be sent to AWS.")
                 }
-            }
 
-            group("Kiro (AWS)") {
+                // ── Kiro ──────────────────────────────────────────────────────
+                separator()
+                row { label("Kiro (AWS)") }
                 row {
                     label("Status:")
                     kiroStatusLabel = label("Click \"Check status\" to verify").component
@@ -221,66 +358,22 @@ class CelebrimbotSettingsConfigurable(private val project: Project) : BoundConfi
                 row {
                     button("Check status") {
                         val ok = AmazonQCliProvider.getInstance(project).isKiroAuthenticated()
-                        kiroStatusLabel.text = if (ok) "✅ Authenticated (token found in ~/.aws/sso/cache/kiro-auth-token*.json)" else "⚠️ Not authenticated — open Kiro IDE and log in first"
+                        kiroStatusLabel.text = if (ok) "✅ Authenticated" else "⚠️ Not authenticated"
                     }
                     button("Login with Kiro") {
                         kiroStatusLabel.text = "Opening Kiro login..."
                         AmazonQCliProvider.getInstance(project).loginWithKiro { success ->
-                            kiroStatusLabel.text = if (success) "✅ Authenticated" else "❌ Login failed — open Kiro IDE and log in manually"
+                            kiroStatusLabel.text = if (success) "✅ Authenticated" else "❌ Login failed"
                         }
                     }
                 }
                 row {
                     comment(
-                        "Kiro writes its auth token to <code>~/.aws/sso/cache/kiro-auth-token.json</code>.<br/>" +
-                        "If you are already logged in to Kiro IDE, click <b>Check status</b> — no extra login needed.<br/>" +
-                        "Kiro uses the same CodeWhisperer API as Amazon Q Developer."
-                    )
-                }
-                row {
-                    comment(
-                        "⚠️ Kiro is a cloud service. Prompts and code context may be sent to AWS.<br/>" +
-                        "Only use this provider for code you are allowed to share with AWS."
+                        "Token at <code>~/.aws/sso/cache/kiro-auth-token.json</code>.<br/>" +
+                        "⚠️ Cloud service. Prompts and code context may be sent to AWS."
                     )
                 }
             }
-        }
-    }
-
-    private fun buildCharacterTable(): JComponent {
-        val panel = JPanel(GridBagLayout())
-        val gc = GridBagConstraints().apply {
-            fill   = GridBagConstraints.HORIZONTAL
-            insets = Insets(3, 6, 3, 6)
-        }
-
-        fun header(text: String, col: Int, weight: Double) {
-            gc.gridx = col; gc.gridy = 0; gc.weightx = weight
-            panel.add(JLabel("<html><b>$text</b></html>"), gc)
-        }
-        header("Character", 0, 0.25)
-        header("Provider",  1, 0.45)
-        header("Model Name (cloud only)", 2, 0.30)
-
-        characterRows.forEachIndexed { i, row ->
-            val y = i + 1
-            gc.gridx = 0; gc.gridy = y; gc.weightx = 0.25
-            panel.add(JLabel(AgentConfig.labelFor(row.key)), gc)
-
-            gc.gridx = 1; gc.gridy = y; gc.weightx = 0.45
-            panel.add(row.providerBox, gc)
-
-            gc.gridx = 2; gc.gridy = y; gc.weightx = 0.30
-            panel.add(row.modelNameField, gc)
-        }
-
-        gc.gridx = 0; gc.gridy = characterRows.size + 1
-        gc.gridwidth = 3; gc.weighty = 1.0; gc.fill = GridBagConstraints.BOTH
-        panel.add(JPanel(), gc)
-
-        return JBScrollPane(panel).apply {
-            preferredSize = java.awt.Dimension(580, 300)
-            border = BorderFactory.createEmptyBorder()
         }
     }
 
@@ -312,6 +405,34 @@ class CelebrimbotSettingsConfigurable(private val project: Project) : BoundConfi
         val modelChanged = localModelComboBox.selectedItem != settings.state.selectedLocalModel
         val agentChanged = characterRows.any { it.isModified() }
         return super.isModified() || modelChanged || agentChanged
+    }
+
+    companion object {
+        val PROMPT_FILES = mapOf(
+            "Gandalf" to "gandalf_system_prompt.txt",
+            "Galadriel" to "galadriel_system_prompt.txt",
+            "Aragorn" to "aragorn_system_prompt.txt",
+            "Elrond" to "elrond_system_prompt.txt",
+            "Celebrimbor" to "celebrimbor_system_prompt.txt",
+            "Samwise" to "samwise_system_prompt.txt",
+            "Frodo" to "frodo_system_prompt.txt",
+            "LegolasGimli" to "legolas_gimli_system_prompt.txt",
+            "Treebeard" to "treebeard_system_prompt.txt",
+            "Bilbo" to "bilbo_system_prompt.txt"
+        )
+
+        val CHARACTER_DESCRIPTIONS = mapOf(
+            "Gandalf" to "Router — classifies requests as CHAT / EASY_TASK / COMPLEX_TASK",
+            "Galadriel" to "Chat — answers questions and conversations directly",
+            "Aragorn" to "Quick Planner — single-pass multi-task plan for EASY_TASK",
+            "Elrond" to "Context Enricher — gathers relevant files and context for complex tasks",
+            "Celebrimbor" to "Master Planner — forges detailed execution plans (cloud)",
+            "Samwise" to "Worker — executes tool calls (read, terminal, search, git)",
+            "Frodo" to "Code Writer — generates and writes code to files",
+            "LegolasGimli" to "Code Writer (pair) — alternative code writer for complex edits",
+            "Treebeard" to "Reviewer — validates completed work, triggers reflection loop",
+            "Bilbo" to "Chronicler — writes session summaries after task completion"
+        )
     }
 }
 

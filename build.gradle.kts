@@ -1,3 +1,4 @@
+import java.util.EnumSet
 import org.jetbrains.changelog.Changelog
 import org.jetbrains.changelog.markdownToHTML
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
@@ -154,6 +155,16 @@ intellijPlatform {
         ides {
             recommended()
         }
+        // ToolWindowFactory.manage/getAnchor/getIcon are marked @ApiStatus.Experimental
+        // in the platform SDK. Our class inherits them without overriding, but the verifier
+        // still flags the usage. Exclude EXPERIMENTAL_API_USAGE from failure conditions.
+        failureLevel.set(
+            EnumSet.complementOf(
+                EnumSet.of(
+                    org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask.FailureLevel.EXPERIMENTAL_API_USAGES
+                )
+            )
+        )
         // Clikt and Ktor are CLI-only dependencies bundled exclusively in the Shadow JAR.
         // They are declared compileOnly so they are absent from the plugin ZIP — the verifier
         // correctly detects them as unresolved, but they will never be loaded by the IDE.

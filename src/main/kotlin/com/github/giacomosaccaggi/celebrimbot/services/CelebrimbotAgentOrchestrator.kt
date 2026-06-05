@@ -89,12 +89,44 @@ class CelebrimbotAgentOrchestrator(
         fun log(msg: String) { onInternalLog?.invoke(msg) }
         coroutineScope.launch {
             try {
-                val routeResult = route(userPrompt, conversationHistory)
-                log("[🧙 Gandalf (${routeResult.provider})] → ${routeResult.raw}")
-                onProgress("<i>[🧙 Gandalf (${routeResult.provider}): ${routeResult.raw}]</i>")
-                val routeDecision = routeResult.decision
+                val settings = com.github.giacomosaccaggi.celebrimbot.settings.CelebrimbotSettingsState.getInstance(project)
+
+                val easyEnabled = settings.state.easyTaskEnabled
+                val complexEnabled = settings.state.complexTaskEnabled
+
+                // Helper: check if a character is set to CLI provider
+                fun isCli(character: String) = settings.getAgentConfig(character).provider ==
+                    com.github.giacomosaccaggi.celebrimbot.settings.CharacterProvider.CLI
+
+                // If Gandalf is CLI, delegate the entire request to CLI (it does its own routing)
+                if (isCli("Gandalf")) {
+                    onProgress("<i>[🧙 Gandalf (CLI): delegating to external agent...]</i>")
+                    delegateToCli(userPrompt, onProgress, ::log, onComplete)
+                    return@launch
+                }
+
+                // If both task modes are disabled, bypass Gandalf entirely and go to Galadriel
+                val routeDecision: RouteDecision = if (!easyEnabled && !complexEnabled) {
+                    onProgress("<i>[⚙ Task modes disabled — going directly to Galadriel]</i>")
+                    RouteDecision.CHAT
+                } else {
+                    val routeResult = route(userPrompt, conversationHistory)
+                    log("[🧙 Gandalf (${routeResult.provider})] → ${routeResult.raw}")
+                    onProgress("<i>[🧙 Gandalf (${routeResult.provider}): ${routeResult.raw}]</i>")
+                    when {
+                        routeResult.decision == RouteDecision.EASY_TASK && !easyEnabled -> RouteDecision.CHAT
+                        routeResult.decision == RouteDecision.COMPLEX_TASK && !complexEnabled -> RouteDecision.CHAT
+                        else -> routeResult.decision
+                    }
+                }
 
                 if (routeDecision == RouteDecision.CHAT) {
+                    // If Galadriel is CLI, delegate chat to CLI
+                    if (isCli("Galadriel")) {
+                        onProgress("<i>[🧝 Galadriel (CLI): delegating to external agent...]</i>")
+                        delegateToCli(userPrompt, onProgress, ::log, onComplete)
+                        return@launch
+                    }
                     val contextPrompt = buildString {
                         if (projectSkeleton.isNotEmpty()) append("Project context:\n$projectSkeleton\n\n")
                         if (conversationHistory.isNotEmpty()) {
@@ -104,11 +136,23 @@ class CelebrimbotAgentOrchestrator(
                         }
                         append("User: $userPrompt")
                     }
-                val galadrielPersona = promptFor("Galadriel", "galadriel_system_prompt.txt")
+                    val galadrielPersona = promptFor("Galadriel", "galadriel_system_prompt.txt")
                     val galadrielResp = llmService.askCharacterWithMeta("Galadriel", contextPrompt, galadrielPersona)
                     onStats?.invoke(1, 0)
                     log("[🧝 Galadriel (${galadrielResp.provider})] ${galadrielResp.text}")
                     onProgress("<b>[🧝 Galadriel (${galadrielResp.provider})]</b> ${PlanParser.markdownToHtml(galadrielResp.text)}")
+                    return@launch
+                }
+
+                // For EASY_TASK / COMPLEX_TASK: if the next character in the chain is CLI, delegate
+                if (routeDecision == RouteDecision.EASY_TASK && isCli("Aragorn")) {
+                    onProgress("<i>[⚔️ Aragorn (CLI): delegating to external agent...]</i>")
+                    delegateToCli(userPrompt, onProgress, ::log, onComplete)
+                    return@launch
+                }
+                if (routeDecision == RouteDecision.COMPLEX_TASK && isCli("Elrond")) {
+                    onProgress("<i>[🧙 Elrond (CLI): delegating to external agent...]</i>")
+                    delegateToCli(userPrompt, onProgress, ::log, onComplete)
                     return@launch
                 }
 
@@ -603,8 +647,12 @@ class CelebrimbotAgentOrchestrator(
 
 
     private fun promptFor(character: String, filename: String): String {
-        val provider = com.github.giacomosaccaggi.celebrimbot.settings.CelebrimbotSettingsState
-            .getInstance(project).getAgentConfig(character).provider
+        val settings = com.github.giacomosaccaggi.celebrimbot.settings.CelebrimbotSettingsState
+            .getInstance(project)
+        // Use custom prompt if the user has overridden it in settings
+        val custom = settings.state.customPrompts[character]
+        if (!custom.isNullOrBlank()) return custom
+        val provider = settings.getAgentConfig(character).provider
         return CelebrimbotLlmService.loadPromptForProvider(filename, provider)
     }
 
@@ -634,4 +682,115 @@ class CelebrimbotAgentOrchestrator(
 
 
     data class ActionResult(val isSuccess: Boolean, val output: String)
+
+    /** Escapes a string for safe use as a shell argument. */
+    private fun shellEscape(s: String): String = "'" + s.replace("'", "'\\''") + "'"
+
+    /** Delegates a prompt to the external CLI and streams output back to chat. */
+    private fun delegateToCli(
+        prompt: String,
+        onProgress: (String) -> Unit,
+        log: (String) -> Unit,
+        onComplete: (() -> Unit)?
+    ): Boolean {
+        val cliCmd = com.github.giacomosaccaggi.celebrimbot.settings.CelebrimbotSettingsState
+            .getInstance(project).state.cliCommand.trim()
+        if (cliCmd.isEmpty()) {
+            onProgress("<b>Error:</b> Character is set to CLI but no CLI command is configured in settings.")
+            onComplete?.invoke()
+            return true
+        }
+        // If the command contains {{MESSAGE}}, substitute it; otherwise append as argument
+        val fullCmd = if (cliCmd.contains("{{MESSAGE}}")) {
+            cliCmd.replace("{{MESSAGE}}", shellEscape(prompt))
+        } else {
+            "$cliCmd ${shellEscape(prompt)}"
+        }
+        log("[CLI] Delegating to: $fullCmd")
+        onProgress("<i>[⚙ Delegating to CLI: <code>${com.github.giacomosaccaggi.celebrimbot.parser.PlanParser.escapeHtml(cliCmd)}</code>]</i>")
+        val outputLines = mutableListOf<String>()
+        var responseShown = false
+        CelebrimbotTerminalService.getInstance(project).runCliAndStream(
+            command = fullCmd,
+            onOutput = { line ->
+                val stripped = line.replace(Regex("\u001B\\[[^A-Za-z]*[A-Za-z]"), "")
+                    .replace(Regex("\u001B\\[\\?[0-9]+[hl]"), "")
+                    .replace("\u0007", "")
+                    .trim()
+                if (stripped.isEmpty()) return@runCliAndStream
+
+                // Detect end of response and show final result
+                if (stripped.contains("▸ Time:") || stripped.startsWith("▸ Time:")) {
+                    if (!responseShown && outputLines.isNotEmpty()) {
+                        responseShown = true
+                        val lastActionIdx = outputLines.indexOfLast { l ->
+                            l.startsWith("Creating:") || l.startsWith("Replacing:")
+                                || l.startsWith("- Completed") || l.startsWith("✓ Successfully")
+                        }
+                        val finalLines = if (lastActionIdx >= 0 && lastActionIdx < outputLines.size - 1) {
+                            outputLines.subList(lastActionIdx + 1, outputLines.size)
+                        } else {
+                            outputLines.toList()
+                        }
+                        val finalResponse = finalLines.joinToString("\n")
+                        ApplicationManager.getApplication().invokeLater {
+                            onProgress("<b>CLI:</b> ${PlanParser.markdownToHtml(finalResponse)}")
+                            onComplete?.invoke()
+                        }
+                    }
+                    return@runCliAndStream
+                }
+
+                // Filter noise
+                if (stripped.contains("Thinking...") && !stripped.contains("> ")) return@runCliAndStream
+                if (stripped.contains("mcp servers initialized")) return@runCliAndStream
+                if (stripped.contains("loaded in ") && ("✓" in stripped || "✗" in stripped)) return@runCliAndStream
+                if (stripped.contains("has failed to load")) return@runCliAndStream
+                if (stripped.contains("Mcp error:")) return@runCliAndStream
+                if (stripped.contains("KIRO_LOG_LEVEL")) return@runCliAndStream
+                if (stripped.contains("ctrl-c")) return@runCliAndStream
+                if (stripped.contains("Did you know?")) return@runCliAndStream
+                if (stripped.startsWith("Picking up")) return@runCliAndStream
+                if (stripped.startsWith("Model:") && stripped.contains("/model")) return@runCliAndStream
+                if (stripped.startsWith("All tools are now trusted")) return@runCliAndStream
+                if (stripped.startsWith("Agents can sometimes")) return@runCliAndStream
+                if (stripped.startsWith("Learn more at")) return@runCliAndStream
+                if (stripped.startsWith("Authenticated")) return@runCliAndStream
+                if (stripped.startsWith("Error: Stream closed")) return@runCliAndStream
+                if (stripped.all { it.code > 0x2800 || it.isWhitespace() || it == '7' || it == '8' }) return@runCliAndStream
+                if (stripped.length > 20 && stripped.count { it.code > 0x2500 } > stripped.length / 2) return@runCliAndStream
+                if (stripped.all { it in "╭╮╰╯│─ " || it.isWhitespace() }) return@runCliAndStream
+                if (stripped.startsWith("│") && stripped.endsWith("│") && stripped.length > 40) return@runCliAndStream
+
+                // Extract meaningful text
+                val text = if (stripped.contains("Thinking...") && stripped.contains("> ")) {
+                    stripped.substringAfterLast("> ").trim()
+                } else {
+                    stripped.replace(Regex("^\\+\\s*\\d+:"), "").trim()
+                }
+                    .replace(Regex("[⠀-⣿]+"), "")
+                    .replace(Regex("✗ \\S+ has failed to load after [\\d.]+ s"), "")
+                    .trim()
+
+                if (text.isNotEmpty()) {
+                    outputLines.add(text)
+                    log("[CLI] $text")
+                }
+            },
+            onDone = {
+                // Fallback: if process ended without ▸ Time: marker
+                if (!responseShown && outputLines.isNotEmpty()) {
+                    responseShown = true
+                    ApplicationManager.getApplication().invokeLater {
+                        val finalResponse = outputLines.takeLast(5).joinToString("\n")
+                        onProgress("<b>CLI:</b> ${PlanParser.markdownToHtml(finalResponse)}")
+                        onComplete?.invoke()
+                    }
+                } else if (!responseShown) {
+                    ApplicationManager.getApplication().invokeLater { onComplete?.invoke() }
+                }
+            }
+        )
+        return true
+    }
 }

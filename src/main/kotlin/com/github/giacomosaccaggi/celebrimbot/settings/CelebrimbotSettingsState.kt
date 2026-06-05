@@ -15,6 +15,24 @@ class CelebrimbotSettingsState : PersistentStateComponent<CelebrimbotSettingsSta
         var selectedLocalModel: LocalAiModel = LocalAiModel.QWEN_7B
         var terminalTimeoutSeconds: Long = 60L
 
+        // ── Cloud model names ─────────────────────────────────────────────────
+        var geminiModelName: String = "gemini-1.5-flash"
+        var alibabaModelName: String = "qwen-plus"
+
+        // ── Task mode toggles ─────────────────────────────────────────────────
+        // When both are disabled Gandalf is bypassed and queries go directly to Galadriel.
+        var easyTaskEnabled: Boolean = true
+        var complexTaskEnabled: Boolean = true
+
+        // ── External CLI delegation ───────────────────────────────────────────
+        // When set, Celebrimbot opens the IDE terminal and delegates the task
+        // to an external agent CLI (e.g. "kiro-cli chat", "junie").
+        var cliCommand: String = ""
+
+        // ── Custom system prompts ─────────────────────────────────────────────
+        // Overridden prompts keyed by character name. Empty = use default from resources.
+        var customPrompts: LinkedHashMap<String, String> = LinkedHashMap()
+
         // ── Per-character agent configuration ─────────────────────────────────
         // Stored as Map<characterKey, AgentConfigDto> so IntelliJ's XML
         // serialiser can round-trip it without custom converters.

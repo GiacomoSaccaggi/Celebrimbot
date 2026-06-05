@@ -4,6 +4,35 @@
 
 ## [Unreleased]
 
+## [0.1.0]
+
+### Added
+- **External CLI delegation**: new `CharacterProvider.CLI` option — any Fellowship character can now delegate its work to an external CLI agent (Kiro, Junie, Aider, etc.) configured in Settings
+- `CelebrimbotTerminalService.runCliAndStream()`: streams CLI stdout back into the chat panel with real-time output filtering (strips ANSI, braille spinners, framework noise)
+- `CelebrimbotTerminalService.runCliAndWait()`: blocking synchronous CLI execution for `askCharacterWithMeta` path
+- `delegateToCli()` in orchestrator: full CLI handoff with `{{MESSAGE}}` placeholder support and intelligent response extraction
+- **Task mode toggles**: `easyTaskEnabled` / `complexTaskEnabled` booleans in settings — when both are disabled, Gandalf is bypassed entirely and all messages go directly to Galadriel (chat-only mode)
+- **Per-character custom system prompts**: editable prompt text area in Settings for each Fellowship character; overrides the bundled resource prompt; "Reset to Default" button restores original
+- **Configurable cloud model names**: `geminiModelName` and `alibabaModelName` fields in settings — no longer hardcoded to `gemini-1.5-flash` / `qwen-plus`
+- **Settings ⚙ button** in chat header: opens Celebrimbot settings directly from the tool window
+- **Collapsible per-character settings**: replaced the flat table with collapsible groups showing character description, provider selector, and prompt editor
+- **Architecture diagram** in settings UI: visual ASCII pipeline diagram explaining Gandalf routing
+
+### Changed
+- Settings UI completely reorganised: Task Modes → Council's Review → Fellowship AI Configuration → Local Model → External CLI → Configure Your APIs (with per-provider sections separated by dividers)
+- `CelebrimbotLlmService.callAlibabaResponses()`: model name now read from settings instead of hardcoded `qwen-plus`
+- `CelebrimbotLlmService.callExternalLlm()`: model name now read from settings instead of hardcoded `gemini-1.5-flash`
+- `promptFor()` in orchestrator: checks `customPrompts` map before loading from resources — custom prompts take priority
+- `CelebrimbotSettingsConfigurable`: removed `buildCharacterTable()` (GridBagLayout table) in favour of `collapsibleGroup` per character with integrated prompt editing
+- Amazon Q / Kiro status messages shortened for clarity
+- IntelliJ Platform Gradle Plugin upgraded: `2.13.1` → `2.16.0`
+- `verifyPlugin` failure level: `EXPERIMENTAL_API_USAGES` excluded (ToolWindowFactory.manage/getAnchor/getIcon are @ApiStatus.Experimental in the platform SDK)
+- Plugin version bumped: `0.0.5` → `0.1.0`
+
+### Fixed
+- `galadrielPersona` indentation in orchestrator (was declared at wrong indentation level in the CHAT branch)
+- Routing bypass when task modes are disabled no longer calls the LLM at all (saves inference time and avoids errors when no local model is loaded)
+
 ## [0.0.4]
 
 ### Added
