@@ -17,6 +17,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    profiles: ["with-ollama"]
 
   model-loader:
     image: ollama/ollama:latest
@@ -32,28 +33,45 @@ services:
       "
     environment:
       - OLLAMA_HOST=ollama:11434
+    profiles: ["with-ollama"]
 
   celebrimbot:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: celebrimbot
-    depends_on:
-      model-loader:
-        condition: service_completed_successfully
     ports:
       - "16180:16180"
     environment:
-      - CELEBRIMBOT_LLM_BASE_URL=http://ollama:11434/v1
-      - CELEBRIMBOT_LLM_MODEL=qwen2.5-coder:7b
-      - CELEBRIMBOT_ROUTER_MODEL=qwen2.5-coder:1.5b
       - CELEBRIMBOT_PORT=16180
-      # Cloud fallbacks (optional — leave empty to disable)
-      - ALIBABA_API_KEY=${ALIBABA_API_KEY:-}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - CELEBRIMBOT_MODEL_UNLOAD_TIMEOUT=300
     volumes:
+      - celebrimbot_models:/root/.celebrimbot/models
       - ./projects:/workspace
     working_dir: /workspace
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:16180/api/version"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Open WebUI — optional. Start with: docker compose --profile ui up
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: celebrimbot-webui
+    ports:
+      - "3000:8080"
+    environment:
+      - OLLAMA_BASE_URL=http://celebrimbot:16180
+      - WEBUI_AUTH=false
+    depends_on:
+      celebrimbot:
+        condition: service_healthy
+    volumes:
+      - webui_data:/app/backend/data
+    profiles: ["ui"]
 
 volumes:
   ollama_data:
+  celebrimbot_models:
+  webui_data:

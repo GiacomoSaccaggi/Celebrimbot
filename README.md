@@ -111,7 +111,7 @@ All four providers — `Local`, `Alibaba Qwen Cloud`, `Google Gemini`, `Amazon Q
 - **Multi-provider fallback** — Local Qwen → Alibaba Cloud (Qwen Plus) → Google Gemini → Claude Sonnet 4.6 (via Amazon Q Developer)
 - **Secure credential storage** — API keys stored via IntelliJ PasswordSafe, never in plain text
 - **Per-project settings** — each project can use a different provider and model
-- **Standalone CLI** — `celebrimbot forge / scan / serve / mcp-stdio / undo` for use outside the IDE
+- **Standalone CLI** — `celebrimbot forge / scan / serve / mcp-stdio / undo` for use outside the IDE (via `server:shadowJar`)
 - **HTTP bridge** — embedded Ktor server for remote invocation from other tools
 - **Dynamic Tool Registry** — all capabilities self-describe as JSON schemas; planners receive auto-generated tool lists, adding a new tool requires zero prompt editing
 - **Shadow Log (Auto-Undo)** — every file is backed up before being written or deleted; `celebrimbot undo` restores the last session from `.celebrimbot/shadow_log/`
@@ -119,6 +119,8 @@ All four providers — `Local`, `Alibaba Qwen Cloud`, `Google Gemini`, `Amazon Q
 - **Elrond's Palantír (BM25 Index)** — lightweight local semantic index; COMPLEX_TASK planning retrieves the top-8 relevant files instead of sending the full project skeleton
 - **MCP Bridge (Beacons of Gondor)** — MCP-compliant JSON-RPC 2.0 server over HTTP (`POST /mcp`) and Stdio (`celebrimbot mcp-stdio`) for Claude Desktop and other MCP hosts
 - **Treebeard (Ent Reviewer)** — critic agent between Workers and Bilbo; reviews completed work against the original request; triggers up to 2 re-planning cycles if incomplete; never hasty, never satisfied with placeholder code
+- **Ollama-Compatible API** — drop-in replacement for Ollama; works with Open WebUI, ProjectCompass, llama-index, and any Ollama/OpenAI-compatible client
+- **OpenAI-Compatible Endpoint** — `POST /v1/chat/completions` for llama-index, LangChain, and other OpenAI SDK clients
 
 ---
 
@@ -142,6 +144,80 @@ All four providers — `Local`, `Alibaba Qwen Cloud`, `Google Gemini`, `Amazon Q
 | Web | `web_search` | DuckDuckGo search |
 | Web | `fetch_page` | Fetch and read a URL |
 | Terminal | `run_terminal` | Execute a shell command |
+
+---
+
+## Ollama-Compatible API
+
+Celebrimbot exposes a full Ollama-compatible API, making it a **drop-in replacement for Ollama**. Point any Ollama client to `http://localhost:16180` and it works.
+
+### Supported Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/tags` | List available models |
+| `GET /api/version` | Server version |
+| `GET /api/ps` | List running models |
+| `POST /api/generate` | Text generation (streaming + non-streaming) |
+| `POST /api/chat` | Chat completion with message history |
+| `POST /api/show` | Model information |
+| `POST /api/embed` | Embeddings (stub — use Ollama for this) |
+| `POST /api/pull` | Download a model from HuggingFace |
+| `POST /v1/chat/completions` | OpenAI-compatible chat completion |
+| `GET /v1/models` | OpenAI-compatible model list |
+
+### Use with Open WebUI
+
+```bash
+# Start Celebrimbot + Open WebUI
+docker compose --profile ui up
+
+# Open WebUI at http://localhost:3000
+# It auto-discovers models via /api/tags
+```
+
+### Use with ProjectCompass
+
+In your `.env` file:
+```
+OLLAMA_HOST=http://localhost:16180
+```
+
+ProjectCompass will use Celebrimbot for chat completion via llama-index.
+
+> **Note:** For RAG embeddings, you still need Ollama with `nomic-embed-text`. Celebrimbot does not yet support embedding models.
+
+### Use with any OpenAI SDK
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:16180/v1", api_key="not-needed")
+response = client.chat.completions.create(
+    model="qwen2.5-coder:1.5b",
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+print(response.choices[0].message.content)
+```
+
+### Available Models
+
+| Model | Name | Size |
+|-------|------|------|
+| Qwen 2.5 Coder 1.5B | `qwen2.5-coder:1.5b` | ~1.2 GB |
+| Qwen 2.5 Coder 7B | `qwen2.5-coder:7b` | ~4.5 GB |
+| Llama 3.1 8B | `llama3.1:8b` | ~5 GB |
+| DeepSeek Coder 6.7B | `deepseek-coder:6.7b` | ~4.5 GB |
+| Phi-3.5 Mini | `phi3.5:3.8b` | ~2.5 GB |
+
+Download models via API or CLI:
+```bash
+# Via CLI
+java -jar server/build/libs/celebrimbot.jar download-model -m qwen-7b
+
+# Via API (like Ollama)
+curl -d '{"model":"qwen2.5-coder:7b"}' http://localhost:16180/api/pull
+```
 
 ---
 
@@ -242,103 +318,152 @@ The header shows `🖥️ N  ☁️ N` — local inference count vs cloud planne
 | Cloud fallback | Google Gemini 1.5 Flash |
 | Cloud option | Amazon Q Developer (Claude Sonnet, via SSO) |
 | CLI | Clikt 4.4.0 |
-| HTTP Bridge | Ktor 2.3.11 (Netty) |
+| HTTP Bridge | Ktor 2.3.12 (Netty) |
 | JSON | Gson 2.10.1 |
-| Build | Gradle 9.4.1 + Shadow JAR |
+| Build | Gradle 9.4.1 (multi-module) |
 
 ---
 
 ## Development
 
+The project is split into **three Gradle modules**:
+
+| Module | Purpose | Main output |
+|--------|---------|-------------|
+| `core` | Shared logic, no IntelliJ deps | Library JAR |
+| `plugin` | IntelliJ Platform plugin | Distributable ZIP |
+| `server` | Standalone CLI + HTTP server | Fat JAR (shadowJar) |
+
 ```bash
-./gradlew runIde          # Run plugin in sandbox IDE
-./gradlew buildPlugin     # Build distributable ZIP
-./gradlew shadowJar       # Build standalone CLI fat JAR (celebrimbot.jar)
-./gradlew test            # Run unit tests
-./gradlew verifyPlugin    # Verify compatibility
+# Plugin development
+./gradlew plugin:runIde          # Run plugin in sandbox IDE
+./gradlew plugin:buildPlugin     # Build distributable ZIP
+./gradlew plugin:verifyPlugin    # Verify compatibility
+./gradlew plugin:test            # Run plugin tests
+
+# Server / CLI
+./gradlew server:shadowJar       # Build standalone CLI fat JAR
+./gradlew server:test            # Run server tests
+
+# Core library
+./gradlew core:test              # Run core unit tests
+./gradlew core:compileKotlin     # Compile core module
 ```
 
-**CLI usage (after shadowJar):**
+**CLI usage (after `server:shadowJar`):**
 ```bash
-java -jar build/libs/celebrimbot.jar forge "create a Python file with a fibonacci function"
-java -jar build/libs/celebrimbot.jar scan
-java -jar build/libs/celebrimbot.jar serve --port 16180
-java -jar build/libs/celebrimbot.jar mcp-stdio
-java -jar build/libs/celebrimbot.jar undo
+java -jar server/build/libs/celebrimbot.jar forge "create a Python file with a fibonacci function"
+java -jar server/build/libs/celebrimbot.jar scan
+java -jar server/build/libs/celebrimbot.jar serve --port 16180
+java -jar server/build/libs/celebrimbot.jar mcp-stdio
+java -jar server/build/libs/celebrimbot.jar undo
+java -jar server/build/libs/celebrimbot.jar download-model --list
+java -jar server/build/libs/celebrimbot.jar download-model -m qwen-7b
 ```
+
+**Docker (team server):**
+```bash
+./gradlew server:shadowJar       # Build first
+docker compose up                # Starts Celebrimbot server only
+docker compose --profile ui up   # Starts Celebrimbot + Open WebUI (http://localhost:3000)
+docker compose --profile with-ollama up  # Starts with Ollama sidecar
+curl localhost:16180/health      # Health check
+curl localhost:16180/api/tags    # List available models (Ollama-compatible)
+```
+
+---
+
+## Memory Management
+
+The local GGUF model uses **lazy loading with automatic unload**:
+
+- The model is **NOT** loaded at IDE startup (zero extra RAM on boot)
+- On first user message, the model loads (~2s delay)
+- After **60 seconds of inactivity**, the model is automatically unloaded from RAM
+- The timeout is configurable in Settings → Tools → Celebrimbot
+
+This means PyCharm stays lightweight when you're not actively using Celebrimbot.
 
 ---
 
 ## Project Structure
 
 ```
-src/main/kotlin/.../celebrimbot/
-├── cli/
-│   └── CelebrimbotCLI                # Standalone CLI (forge / scan / serve / mcp-stdio / undo)
-├── io/
-│   ├── FileOperator                  # Interface for file operations
-│   ├── IdeFileOperator               # PSI/VFS implementation (IDE mode)
-│   ├── HeadlessFileOperator          # java.nio implementation (standalone)
-│   ├── ShadowLogOperator             # Interface for shadow log backup/undo
-│   ├── HeadlessShadowLogOperator     # java.nio shadow log implementation
-│   ├── ShadowedFileOperator          # Decorator: intercepts writes/deletes for backup
-│   ├── TerminalOperator              # Interface for terminal execution (returns TerminalResult)
-│   ├── IdeTerminalOperator           # IDE terminal implementation
-│   ├── HeadlessTerminalOperator      # ProcessBuilder implementation
-│   ├── LlmEngine                     # Interface for LLM inference
-│   ├── StandaloneLlmEngine           # llama.cpp standalone implementation
-│   ├── WebSearchOperator             # Interface for web search + fetch_page
-│   ├── DuckDuckGoSearchOperator      # DuckDuckGo implementation
-│   ├── ProjectScanOperator           # Interface for project scanning + walkSourceFiles
-│   ├── HeadlessProjectScanOperator   # java.nio implementation
-│   ├── GitOperator                   # Interface for git operations
-│   └── HeadlessGitOperator           # ProcessBuilder git implementation
-├── index/
-│   └── PalantirIndex                 # BM25 semantic index (build, query, save, load)
-├── mcp/
-│   ├── McpRouter                     # JSON-RPC 2.0 dispatcher (all MCP method handlers)
-│   └── McpTransport                  # Compact JSON-RPC response/error formatting
-├── model/
-│   ├── CelebrimbotPlan               # CelebrimbotTask data class
-│   ├── CelebrimbotTool               # CelebrimbotTool interface, ToolParam, ToolResult, ToolCategory
-│   └── TreebeardReviewResult         # Treebeard's verdict: isComplete, reasoning, additionalRequests
-├── registry/
-│   ├── ToolRegistry                  # Central tool vault with toJsonSchema() and toMcpToolList()
-│   └── tools/
-│       └── Tools                     # 15 tool implementations wrapping all operators
-├── services/
-│   ├── CelebrimbotAgentOrchestrator  # Multi-agent loop: routing, planning, execution, reflection
-│   ├── CelebrimbotLlmService         # AI provider abstraction (local/Alibaba/Gemini/Amazon Q)
-│   ├── CelebrimbotEmbeddedEngine     # Local llama.cpp inference engine
-│   ├── CelebrimbotTerminalService    # IDE terminal command execution
-│   ├── ValidationService             # Build system detection + Council's Review command
-│   └── TreebeardReviewService        # Ent Reviewer: reflection loop after Workers
-├── settings/
-│   ├── CelebrimbotSettingsState      # Persistent per-project configuration
-│   ├── CelebrimbotSettingsConfigurable # Settings UI panel
-│   └── CelebrimbotPasswordSafe       # Secure API key storage
-├── startup/
-│   └── CelebrimbotStartupActivity    # Plugin init, model warm-up, Palantír index refresh
-├── toolWindow/
-│   └── CelebrimbotToolWindowFactory  # Chat UI panel with stats counter and copy/clear
-└── MyBundle.kt                       # i18n resource bundle accessor
-
-src/main/resources/
-├── prompts/
-│   ├── gandalf_system_prompt.txt     # Router: CHAT / EASY_TASK / COMPLEX_TASK
-│   ├── galadriel_system_prompt.txt   # Conversational AI persona
-│   ├── aragorn_system_prompt.txt     # Easy-task planner persona
-│   ├── elrond_system_prompt.txt      # Complex pre-planner persona
-│   ├── celebrimbor_system_prompt.txt # Master planner persona
-│   ├── samwise_system_prompt.txt     # Precise worker persona
-│   ├── frodo_system_prompt.txt       # Adventurous worker persona (write_code)
-│   ├── legolas_gimli_system_prompt.txt # Expert worker duo persona (complex tasks)
-│   ├── treebeard_system_prompt.txt   # Ent Reviewer persona: slow, methodical, strict JSON output
-│   └── bilbo_system_prompt.txt       # Session chronicler persona
-├── icons/
-│   └── celebrimbot.svg
-└── META-INF/
-    └── plugin.xml
+celebrimbot/
+├── core/                              # Zero IntelliJ deps — pure Kotlin + llama + Gson
+│   └── src/main/kotlin/.../
+│       ├── engine/
+│       │   ├── LazyModelManager       # Lazy-load + auto-unload timer for GGUF models
+│       │   └── ChatTemplateFormatter  # Chat template formatting (ChatML, Llama3, Phi3)
+│       ├── io/
+│       │   ├── FileOperator           # Interface for file operations
+│       │   ├── HeadlessFileOperator    # java.nio implementation (standalone)
+│       │   ├── ShadowLogOperator      # Interface for shadow log backup/undo
+│       │   ├── HeadlessShadowLogOperator # java.nio shadow log implementation
+│       │   ├── ShadowedFileOperator   # Decorator: intercepts writes/deletes for backup
+│       │   ├── TerminalOperator       # Interface for terminal execution
+│       │   ├── HeadlessTerminalOperator # ProcessBuilder implementation
+│       │   ├── LlmEngine             # Interface for LLM inference
+│       │   ├── StandaloneLlmEngine    # llama.cpp with LazyModelManager delegation
+│       │   ├── WebSearchOperator      # Interface for web search + fetch_page
+│       │   ├── DuckDuckGoSearchOperator # DuckDuckGo implementation
+│       │   ├── ProjectScanOperator    # Interface for project scanning
+│       │   ├── HeadlessProjectScanOperator # java.nio implementation
+│       │   ├── GitOperator           # Interface for git operations
+│       │   └── HeadlessGitOperator    # ProcessBuilder git implementation
+│       ├── index/
+│       │   └── PalantirIndex          # BM25 semantic index (build, query, save, load)
+│       ├── mcp/
+│       │   ├── McpRouter              # JSON-RPC 2.0 dispatcher (MCP method handlers)
+│       │   └── McpTransport           # Compact JSON-RPC response/error formatting
+│       ├── model/
+│       │   ├── CelebrimbotPlan        # CelebrimbotTask data class
+│       │   ├── CelebrimbotTool        # Tool interface, ToolParam, ToolResult, ToolCategory
+│       │   └── TreebeardReviewResult  # Treebeard's verdict
+│       ├── parser/
+│       │   └── PlanParser             # JSON plan parsing from LLM output
+│       ├── registry/
+│       │   ├── ToolRegistry           # Central tool vault with toJsonSchema()
+│       │   └── tools/Tools            # 15 tool implementations wrapping all operators
+│       └── settings/
+│           ├── LocalAiModel           # GGUF model catalogue (enum)
+│           └── AgentConfig            # Per-character provider configuration
+│
+├── plugin/                            # IntelliJ Platform plugin
+│   └── src/main/kotlin/.../
+│       ├── services/
+│       │   ├── CelebrimbotAgentOrchestrator  # Multi-agent loop
+│       │   ├── CelebrimbotLlmService  # AI provider abstraction
+│       │   ├── CelebrimbotEmbeddedEngine # IDE model download + inference
+│       │   ├── LocalModelManager      # IDE wrapper for LazyModelManager
+│       │   ├── ValidationService      # Build system detection + Council's Review
+│       │   └── TreebeardReviewService # Ent Reviewer: reflection loop
+│       ├── settings/
+│       │   ├── CelebrimbotSettingsState # Persistent per-project configuration
+│       │   ├── CelebrimbotSettingsConfigurable # Settings UI panel
+│       │   └── CelebrimbotPasswordSafe # Secure API key storage
+│       ├── toolWindow/
+│       │   └── CelebrimbotToolWindowFactory # Chat UI panel
+│       ├── startup/
+│       │   └── CelebrimbotStartupActivity # Model download (no eager load) + Palantír refresh
+│       └── io/
+│           ├── IdeFileOperator        # PSI/VFS implementation (IDE mode)
+│           └── IdeTerminalOperator    # IDE terminal implementation
+│
+├── server/                            # Standalone CLI + HTTP server (Docker-ready)
+│   └── src/main/kotlin/.../
+│       ├── cli/
+│       │   └── CelebrimbotCLI        # Clikt CLI (forge / scan / serve / mcp-stdio / undo / download-model)
+│       ├── http/
+│       │   └── CelebrimbotServer     # Ktor HTTP server (all routes wired here)
+│       └── ollama/
+│           ├── ModelRouter            # Maps Ollama-style model names to GGUF files
+│           └── OllamaRoutes           # Full Ollama-compatible API (/api/chat, /api/generate, etc.)
+│
+├── core/src/main/resources/prompts/   # Shared LLM system prompts (all characters)
+├── plugin/src/main/resources/         # META-INF/plugin.xml, icons, messages
+├── Dockerfile                         # Server container image
+└── docker-compose.yml                 # Celebrimbot + optional Open WebUI + optional Ollama
 ```
 
 ---

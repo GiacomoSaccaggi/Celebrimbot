@@ -3,3 +3,5 @@ plugins {
 }
 
 rootProject.name = "Celebrimbot"
+
+include("core", "plugin", "server")

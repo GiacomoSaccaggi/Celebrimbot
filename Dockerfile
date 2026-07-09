@@ -3,7 +3,9 @@ FROM eclipse-temurin:21-jre-alpine
 RUN apk add --no-cache curl bash
 
 WORKDIR /app
-COPY build/libs/celebrimbot.jar /app/celebrimbot.jar
+COPY server/build/libs/celebrimbot.jar /app/celebrimbot.jar
+
+ENV CELEBRIMBOT_MODEL_UNLOAD_TIMEOUT=300
 
 EXPOSE 16180
 

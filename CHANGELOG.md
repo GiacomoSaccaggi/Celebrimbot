@@ -4,6 +4,40 @@
 
 ## [Unreleased]
 
+## [1.0.0]
+
+### Added
+- **Multi-module Gradle structure**: project split into `core/` (pure Kotlin), `plugin/` (IntelliJ), `server/` (standalone CLI + HTTP)
+- **LazyModelManager**: model loaded only on first use, auto-unloaded after 60s of inactivity — zero RAM overhead at IDE startup
+- **Ollama-Compatible API**: full drop-in replacement for Ollama with streaming support
+  - `POST /api/chat` — chat completion with message history (streaming + non-streaming)
+  - `POST /api/generate` — text generation (streaming + non-streaming)
+  - `GET /api/tags` — list available models
+  - `GET /api/version` — server version
+  - `GET /api/ps` — list running models
+  - `POST /api/show` — model information
+  - `POST /api/pull` — download models from HuggingFace
+  - `POST /api/embed` — embeddings (stub, recommends Ollama)
+- **OpenAI-Compatible API**: `POST /v1/chat/completions` with SSE streaming, `GET /v1/models`
+- **ModelRouter**: maps Ollama-style model names (e.g. `qwen2.5-coder:1.5b`) to GGUF files, single-model-in-RAM policy
+- **ChatTemplateFormatter**: proper chat template formatting for Qwen (ChatML), Llama 3, Phi-3, with auto-detection
+- **`download-model` CLI command**: download GGUF models from HuggingFace (`--list` to see available, `-m` to select)
+- **Open WebUI support**: `docker compose --profile ui up` starts Celebrimbot + Open WebUI on port 3000
+- **ProjectCompass compatibility**: set `OLLAMA_HOST=http://localhost:16180` and llama-index works directly
+
+### Changed
+- `CelebrimbotStartupActivity` no longer loads model eagerly — model loads lazily on first inference
+- `CelebrimbotEmbeddedEngine.askQuestion()` now delegates to `LazyModelManager.infer()` for proper auto-unload
+- `LocalModelManager` (plugin) wraps `LazyModelManager` (core) instead of managing LlamaModel directly
+- `ServeCommand` (CLI) now delegates to `CelebrimbotServer` with all Ollama routes
+- `StandaloneLlmEngine` delegates to `LazyModelManager` — no more permanent model in RAM
+- Shadow plugin upgraded to `com.gradleup.shadow:9.0.0-beta4` (Gradle 9 compatibility)
+- Docker compose reorganised with profiles: default (just Celebrimbot), `ui` (+ Open WebUI), `with-ollama` (+ Ollama sidecar)
+
+### Fixed
+- Memory leak: model stayed in RAM indefinitely even when unused
+- Double model loading on parallel requests (CelebrimbotServer now uses singleton engine)
+
 ## [0.1.1]
 
 ### Fixed

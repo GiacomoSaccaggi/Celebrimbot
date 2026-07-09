@@ -15,3 +15,4 @@ build
 /setup-github-secrets.sh
 *.pyc
 __pycache__/
+llama.log
