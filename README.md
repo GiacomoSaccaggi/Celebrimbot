@@ -4,8 +4,8 @@
 
 <p align="center">
   <img src="https://github.com/GiacomoSaccaggi/Celebrimbot/workflows/Build/badge.svg" alt="Build"/>
-  <a href="https://plugins.jetbrains.com/plugin/MARKETPLACE_ID"><img src="https://img.shields.io/jetbrains/plugin/v/MARKETPLACE_ID.svg" alt="Version"/></a>
-  <a href="https://plugins.jetbrains.com/plugin/MARKETPLACE_ID"><img src="https://img.shields.io/jetbrains/plugin/d/MARKETPLACE_ID.svg" alt="Downloads"/></a>
+  <a href="https://plugins.jetbrains.com/plugin/32055-celebrimbot"><img src="https://img.shields.io/jetbrains/plugin/v/32055.svg" alt="Version"/></a>
+  <a href="https://plugins.jetbrains.com/plugin/32055-celebrimbot"><img src="https://img.shields.io/jetbrains/plugin/d/32055.svg" alt="Downloads"/></a>
 </p>
 
 <p align="center"><em>An autonomous AI coding agent embedded directly into your JetBrains IDE.</em></p>
