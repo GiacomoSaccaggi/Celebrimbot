@@ -238,7 +238,12 @@ jobs:
           VERSION=$(./gradlew properties --property version --quiet --console=plain -p plugin | tail -n 1 | cut -f2- -d ' ')
           RELEASE_NOTE="./plugin/build/tmp/release_note.txt"
           mkdir -p ./plugin/build/tmp
-          ./gradlew plugin:getChangelog --unreleased --no-header --quiet --console=plain --output-file=$RELEASE_NOTE
+          ./gradlew plugin:getChangelog --unreleased --no-header --quiet --console=plain --output-file=$RELEASE_NOTE || true
+
+          # Fallback if changelog is empty or task failed
+          if [ ! -s "$RELEASE_NOTE" ]; then
+            echo "No changelog entries for this release." > "$RELEASE_NOTE"
+          fi
 
           gh release create $VERSION \
             --draft \
