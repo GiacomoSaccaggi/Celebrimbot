@@ -123,7 +123,7 @@ jobs:
             ${{ github.workspace }}/plugin/build/reports/tests
 
       - name: Upload Code Coverage Report
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           files: ${{ github.workspace }}/plugin/build/reports/kover/report.xml
           token: ${{ secrets.CODECOV_TOKEN }}
